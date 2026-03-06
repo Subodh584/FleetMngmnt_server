@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from datetime import timedelta
 
+import dj_database_url
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -50,6 +52,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -84,14 +87,10 @@ ASGI_APPLICATION = 'app.asgi.application'
 # ---------------------------------------------------------------------------
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('DB_NAME', 'fleet_management'),
-        'USER': os.environ.get('DB_USER', 'user62'),
-        'PASSWORD': os.environ.get('DB_PASSWORD', 'Archanachauhan@123'),
-        'HOST': os.environ.get('DB_HOST', 'localhost'),
-        'PORT': os.environ.get('DB_PORT', '5432'),
-    }
+    'default': dj_database_url.config(
+        default='postgresql://user62:Archanachauhan%40123@localhost:5432/fleet_management',
+        conn_max_age=600,
+    )
 }
 
 # ---------------------------------------------------------------------------
@@ -120,6 +119,7 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
@@ -188,8 +188,8 @@ CHANNEL_LAYERS = {
     },
 }
 
-# Fallback to in-memory channel layer for development when Redis is unavailable
-if os.environ.get('USE_IN_MEMORY_CHANNEL_LAYER', 'False').lower() in ('true', '1', 'yes'):
+# Fallback to in-memory channel layer when Redis is unavailable
+if not os.environ.get('REDIS_URL'):
     CHANNEL_LAYERS = {
         'default': {
             'BACKEND': 'channels.layers.InMemoryChannelLayer',
