@@ -50,7 +50,12 @@ class UserRegistrationSerializer(serializers.Serializer):
         phone = validated_data.pop('phone', '')
         password = validated_data.pop('password')
         user = User.objects.create_user(password=password, **validated_data)
-        UserProfile.objects.create(user=user, role=role, phone=phone)
+        # The post_save signal auto-creates a profile, so update it
+        # instead of creating a duplicate.
+        profile, created = UserProfile.objects.get_or_create(user=user)
+        profile.role = role
+        profile.phone = phone
+        profile.save(update_fields=['role', 'phone'])
         return user
 
 

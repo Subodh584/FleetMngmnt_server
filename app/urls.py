@@ -17,10 +17,10 @@ urlpatterns = [
 
     # API v1
     path('api/v1/', include('core.urls')),
-    path('api/v1/', include('fleet.urls')),
-    path('api/v1/', include('trips.urls')),
-    path('api/v1/', include('maintenance.urls')),
-    path('api/v1/', include('comms.urls')),
+    path('api/v1/fleet/', include('fleet.urls')),
+    path('api/v1/trips/', include('trips.urls')),
+    path('api/v1/maintenance/', include('maintenance.urls')),
+    path('api/v1/comms/', include('comms.urls')),
 
     # OpenAPI schema & docs
     path('api/v1/schema/', SpectacularAPIView.as_view(), name='schema'),
