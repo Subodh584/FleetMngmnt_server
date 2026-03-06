@@ -1,0 +1,438 @@
+-- ============================================================
+-- FLEET MANAGEMENT SYSTEM - PostgreSQL Database Schema
+-- ============================================================
+
+-- ============================================================
+-- ENUMS
+-- ============================================================
+
+CREATE TYPE user_role AS ENUM ('driver', 'fleet_manager', 'maintenance_staff');
+CREATE TYPE vehicle_status AS ENUM ('available', 'in_trip', 'idle', 'under_maintenance');
+CREATE TYPE trip_status AS ENUM ('assigned', 'in_progress', 'completed', 'cancelled', 'delayed');
+CREATE TYPE order_status AS ENUM ('pending', 'assigned', 'in_transit', 'delivered', 'failed');
+CREATE TYPE drop_status AS ENUM ('pending', 'in_transit', 'arrived', 'delivered', 'failed');
+CREATE TYPE inspection_item_result AS ENUM ('pass', 'fail', 'na');
+CREATE TYPE issue_severity AS ENUM ('low', 'medium', 'high', 'critical');
+CREATE TYPE issue_status AS ENUM ('reported', 'acknowledged', 'in_repair', 'resolved');
+CREATE TYPE repair_status AS ENUM ('pending', 'in_progress', 'completed', 'cancelled');
+CREATE TYPE maintenance_type AS ENUM ('preventive', 'corrective', 'emergency');
+CREATE TYPE expense_type AS ENUM ('fuel', 'toll', 'parking', 'other');
+CREATE TYPE alert_type AS ENUM ('sos', 'route_deviation', 'geofence_entry', 'geofence_exit', 'maintenance_due', 'issue_reported');
+CREATE TYPE notification_status AS ENUM ('unread', 'read');
+CREATE TYPE proof_type AS ENUM ('photo', 'signature', 'digital_confirmation');
+
+-- ============================================================
+-- USERS & AUTHENTICATION
+-- ============================================================
+
+CREATE TABLE users (
+    id              SERIAL PRIMARY KEY,
+    full_name       VARCHAR(150) NOT NULL,
+    email           VARCHAR(255) UNIQUE NOT NULL,
+    phone           VARCHAR(20),
+    password_hash   TEXT NOT NULL,
+    role            user_role NOT NULL,
+    is_active       BOOLEAN DEFAULT TRUE,
+    profile_photo   TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- VEHICLES
+-- ============================================================
+
+CREATE TABLE vehicles (
+    id                  SERIAL PRIMARY KEY,
+    registration_no     VARCHAR(50) UNIQUE NOT NULL,
+    make                VARCHAR(100) NOT NULL,
+    model               VARCHAR(100) NOT NULL,
+    year                INTEGER,
+    vin                 VARCHAR(100) UNIQUE,
+    fuel_type           VARCHAR(30),                   -- diesel, petrol, electric, etc.
+    capacity_kg         NUMERIC(10, 2),
+    status              vehicle_status DEFAULT 'available',
+    current_mileage_km  NUMERIC(10, 2) DEFAULT 0,
+    last_service_date   DATE,
+    next_service_due_km NUMERIC(10, 2),               -- for preventive maintenance alerts
+    next_service_due_date DATE,                        -- time-based service due date
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- LOCATIONS (Warehouses, Drop Points, Generic)
+-- ============================================================
+
+CREATE TABLE locations (
+    id          SERIAL PRIMARY KEY,
+    name        VARCHAR(200) NOT NULL,
+    address     TEXT,
+    latitude    NUMERIC(10, 7) NOT NULL,
+    longitude   NUMERIC(10, 7) NOT NULL,
+    is_warehouse BOOLEAN DEFAULT FALSE,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- GEOFENCES
+-- ============================================================
+
+CREATE TABLE geofences (
+    id              SERIAL PRIMARY KEY,
+    location_id     INTEGER REFERENCES locations(id) ON DELETE CASCADE,
+    name            VARCHAR(200) NOT NULL,
+    center_lat      NUMERIC(10, 7) NOT NULL,
+    center_lng      NUMERIC(10, 7) NOT NULL,
+    radius_meters   NUMERIC(10, 2) NOT NULL,           -- circular geofence radius
+    created_by      INTEGER REFERENCES users(id),
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- DELIVERY ORDERS
+-- ============================================================
+
+CREATE TABLE orders (
+    id              SERIAL PRIMARY KEY,
+    order_ref       VARCHAR(50) UNIQUE NOT NULL,       -- human-readable unique order ID
+    created_by      INTEGER NOT NULL REFERENCES users(id),   -- fleet manager
+    warehouse_id    INTEGER NOT NULL REFERENCES locations(id),
+    status          order_status DEFAULT 'pending',
+    notes           TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Drop points for each order (supports multiple drop locations per order)
+CREATE TABLE order_drop_points (
+    id              SERIAL PRIMARY KEY,
+    order_id        INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    location_id     INTEGER NOT NULL REFERENCES locations(id),
+    sequence_no     INTEGER NOT NULL,                  -- delivery sequence order
+    contact_name    VARCHAR(150),
+    contact_phone   VARCHAR(20),
+    notes           TEXT,
+    status          drop_status DEFAULT 'pending',
+    eta             TIMESTAMPTZ,
+    arrived_at      TIMESTAMPTZ,                       -- geofence-triggered
+    delivered_at    TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (order_id, sequence_no)
+);
+
+-- ============================================================
+-- TRIPS
+-- ============================================================
+
+CREATE TABLE trips (
+    id              SERIAL PRIMARY KEY,
+    order_id        INTEGER NOT NULL REFERENCES orders(id),
+    vehicle_id      INTEGER NOT NULL REFERENCES vehicles(id),
+    driver_id       INTEGER NOT NULL REFERENCES users(id),
+    assigned_by     INTEGER REFERENCES users(id),      -- fleet manager
+    status          trip_status DEFAULT 'assigned',
+    route_id        INTEGER,                           -- FK added after routes table
+    start_mileage_km NUMERIC(10, 2),
+    end_mileage_km  NUMERIC(10, 2),
+    start_location_lat  NUMERIC(10, 7),
+    start_location_lng  NUMERIC(10, 7),
+    end_location_lat    NUMERIC(10, 7),
+    end_location_lng    NUMERIC(10, 7),
+    started_at      TIMESTAMPTZ,
+    ended_at        TIMESTAMPTZ,
+    scheduled_start TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- ROUTES & NAVIGATION
+-- ============================================================
+
+CREATE TABLE routes (
+    id              SERIAL PRIMARY KEY,
+    trip_id         INTEGER UNIQUE REFERENCES trips(id) ON DELETE CASCADE,
+    origin_lat      NUMERIC(10, 7) NOT NULL,
+    origin_lng      NUMERIC(10, 7) NOT NULL,
+    destination_lat NUMERIC(10, 7) NOT NULL,
+    destination_lng NUMERIC(10, 7) NOT NULL,
+    optimized_path  JSONB,                             -- array of waypoints [{lat, lng, sequence}]
+    total_distance_km NUMERIC(10, 2),
+    estimated_duration_min INTEGER,
+    approved_by     INTEGER REFERENCES users(id),      -- fleet manager approval
+    approved_at     TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Add FK from trips to routes (circular reference resolved with ALTER TABLE)
+ALTER TABLE trips ADD CONSTRAINT fk_trips_route
+    FOREIGN KEY (route_id) REFERENCES routes(id) ON DELETE SET NULL;
+
+-- Route deviation events
+CREATE TABLE route_deviations (
+    id              SERIAL PRIMARY KEY,
+    trip_id         INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    latitude        NUMERIC(10, 7) NOT NULL,
+    longitude       NUMERIC(10, 7) NOT NULL,
+    deviation_meters NUMERIC(10, 2),
+    detected_at     TIMESTAMPTZ DEFAULT NOW(),
+    resolved_at     TIMESTAMPTZ
+);
+
+-- ============================================================
+-- GPS / VEHICLE TRACKING
+-- ============================================================
+
+CREATE TABLE gps_logs (
+    id          BIGSERIAL PRIMARY KEY,
+    trip_id     INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    vehicle_id  INTEGER NOT NULL REFERENCES vehicles(id),
+    latitude    NUMERIC(10, 7) NOT NULL,
+    longitude   NUMERIC(10, 7) NOT NULL,
+    speed_kmh   NUMERIC(6, 2),
+    heading_deg NUMERIC(5, 2),
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_gps_logs_trip ON gps_logs(trip_id);
+CREATE INDEX idx_gps_logs_recorded_at ON gps_logs(recorded_at DESC);
+
+-- Geofence event log
+CREATE TABLE geofence_events (
+    id              SERIAL PRIMARY KEY,
+    trip_id         INTEGER REFERENCES trips(id) ON DELETE CASCADE,
+    vehicle_id      INTEGER NOT NULL REFERENCES vehicles(id),
+    geofence_id     INTEGER NOT NULL REFERENCES geofences(id),
+    drop_point_id   INTEGER REFERENCES order_drop_points(id),
+    event_type      VARCHAR(10) NOT NULL CHECK (event_type IN ('entry', 'exit')),
+    latitude        NUMERIC(10, 7),
+    longitude       NUMERIC(10, 7),
+    occurred_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- VEHICLE INSPECTIONS
+-- ============================================================
+
+CREATE TABLE inspection_checklists (
+    id          SERIAL PRIMARY KEY,
+    name        VARCHAR(150) NOT NULL,                 -- e.g. "Pre-Trip Standard Checklist"
+    is_active   BOOLEAN DEFAULT TRUE,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE inspection_checklist_items (
+    id              SERIAL PRIMARY KEY,
+    checklist_id    INTEGER NOT NULL REFERENCES inspection_checklists(id) ON DELETE CASCADE,
+    item_name       VARCHAR(200) NOT NULL,             -- e.g. "Tire Pressure", "Brakes"
+    sequence_no     INTEGER NOT NULL,
+    is_required     BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE inspections (
+    id              SERIAL PRIMARY KEY,
+    trip_id         INTEGER REFERENCES trips(id),
+    vehicle_id      INTEGER NOT NULL REFERENCES vehicles(id),
+    driver_id       INTEGER NOT NULL REFERENCES users(id),
+    checklist_id    INTEGER REFERENCES inspection_checklists(id),
+    inspection_type VARCHAR(20) DEFAULT 'pre_trip' CHECK (inspection_type IN ('pre_trip', 'post_trip', 'ad_hoc')),
+    overall_status  VARCHAR(20) DEFAULT 'pending' CHECK (overall_status IN ('pending', 'approved', 'flagged')),
+    notes           TEXT,
+    reviewed_by     INTEGER REFERENCES users(id),      -- maintenance staff
+    reviewed_at     TIMESTAMPTZ,
+    submitted_at    TIMESTAMPTZ DEFAULT NOW(),
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE inspection_results (
+    id                  SERIAL PRIMARY KEY,
+    inspection_id       INTEGER NOT NULL REFERENCES inspections(id) ON DELETE CASCADE,
+    checklist_item_id   INTEGER NOT NULL REFERENCES inspection_checklist_items(id),
+    result              inspection_item_result NOT NULL,
+    notes               TEXT,
+    photo_url           TEXT
+);
+
+-- ============================================================
+-- VEHICLE ISSUES & DEFECT REPORTS
+-- ============================================================
+
+CREATE TABLE vehicle_issues (
+    id              SERIAL PRIMARY KEY,
+    vehicle_id      INTEGER NOT NULL REFERENCES vehicles(id),
+    reported_by     INTEGER NOT NULL REFERENCES users(id),  -- driver
+    inspection_id   INTEGER REFERENCES inspections(id),     -- optional link to inspection
+    title           VARCHAR(255) NOT NULL,
+    description     TEXT,
+    severity        issue_severity DEFAULT 'medium',
+    status          issue_status DEFAULT 'reported',
+    photo_url       TEXT,
+    reported_at     TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- MAINTENANCE
+-- ============================================================
+
+CREATE TABLE maintenance_schedules (
+    id              SERIAL PRIMARY KEY,
+    vehicle_id      INTEGER NOT NULL REFERENCES vehicles(id),
+    scheduled_by    INTEGER NOT NULL REFERENCES users(id),
+    maintenance_type maintenance_type NOT NULL,
+    description     TEXT NOT NULL,
+    scheduled_date  DATE NOT NULL,
+    estimated_duration_hours NUMERIC(5, 2),
+    status          VARCHAR(20) DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'in_progress', 'completed', 'cancelled')),
+    notes           TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE maintenance_records (
+    id                  SERIAL PRIMARY KEY,
+    vehicle_id          INTEGER NOT NULL REFERENCES vehicles(id),
+    schedule_id         INTEGER REFERENCES maintenance_schedules(id),
+    issue_id            INTEGER REFERENCES vehicle_issues(id),
+    maintenance_type    maintenance_type NOT NULL,
+    description         TEXT NOT NULL,
+    repair_status       repair_status DEFAULT 'pending',
+    assigned_to         INTEGER REFERENCES users(id),     -- technician
+    assigned_by         INTEGER REFERENCES users(id),     -- maintenance staff manager
+    started_at          TIMESTAMPTZ,
+    completed_at        TIMESTAMPTZ,
+    total_cost          NUMERIC(10, 2),
+    mileage_at_service  NUMERIC(10, 2),
+    technician_notes    TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Spare parts used in a maintenance record
+CREATE TABLE spare_parts_used (
+    id                  SERIAL PRIMARY KEY,
+    maintenance_id      INTEGER NOT NULL REFERENCES maintenance_records(id) ON DELETE CASCADE,
+    part_name           VARCHAR(200) NOT NULL,
+    part_number         VARCHAR(100),
+    quantity            NUMERIC(10, 2) NOT NULL,
+    unit_cost           NUMERIC(10, 2),
+    total_cost          NUMERIC(10, 2) GENERATED ALWAYS AS (quantity * unit_cost) STORED,
+    created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- EXPENSES & FUEL
+-- ============================================================
+
+CREATE TABLE trip_expenses (
+    id              SERIAL PRIMARY KEY,
+    trip_id         INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    driver_id       INTEGER NOT NULL REFERENCES users(id),
+    expense_type    expense_type NOT NULL,
+    amount          NUMERIC(10, 2) NOT NULL,
+    currency        CHAR(3) DEFAULT 'INR',
+    description     TEXT,
+    receipt_url     TEXT,
+    recorded_at     TIMESTAMPTZ DEFAULT NOW(),
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE fuel_logs (
+    id              SERIAL PRIMARY KEY,
+    trip_id         INTEGER NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
+    vehicle_id      INTEGER NOT NULL REFERENCES vehicles(id),
+    driver_id       INTEGER NOT NULL REFERENCES users(id),
+    fuel_amount_liters NUMERIC(8, 2) NOT NULL,
+    cost_per_liter  NUMERIC(8, 2),
+    total_cost      NUMERIC(10, 2) NOT NULL,
+    odometer_km     NUMERIC(10, 2),
+    fuel_station    VARCHAR(200),
+    receipt_url     TEXT,
+    logged_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- MESSAGING / COMMUNICATION
+-- ============================================================
+
+CREATE TABLE messages (
+    id              SERIAL PRIMARY KEY,
+    sender_id       INTEGER NOT NULL REFERENCES users(id),
+    receiver_id     INTEGER NOT NULL REFERENCES users(id),
+    trip_id         INTEGER REFERENCES trips(id),       -- optional context
+    content         TEXT NOT NULL,
+    is_read         BOOLEAN DEFAULT FALSE,
+    read_at         TIMESTAMPTZ,
+    sent_at         TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_messages_receiver ON messages(receiver_id, is_read);
+CREATE INDEX idx_messages_trip ON messages(trip_id);
+
+-- ============================================================
+-- NOTIFICATIONS & ALERTS
+-- ============================================================
+
+CREATE TABLE notifications (
+    id              SERIAL PRIMARY KEY,
+    user_id         INTEGER NOT NULL REFERENCES users(id),
+    alert_type      alert_type NOT NULL,
+    title           VARCHAR(255) NOT NULL,
+    body            TEXT,
+    status          notification_status DEFAULT 'unread',
+    reference_id    INTEGER,                           -- polymorphic: trip_id, issue_id, etc.
+    reference_type  VARCHAR(50),                       -- 'trip', 'vehicle_issue', 'maintenance', etc.
+    read_at         TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_notifications_user ON notifications(user_id, status);
+
+-- SOS / Emergency alerts (richer detail than generic notification)
+CREATE TABLE sos_alerts (
+    id              SERIAL PRIMARY KEY,
+    driver_id       INTEGER NOT NULL REFERENCES users(id),
+    vehicle_id      INTEGER NOT NULL REFERENCES vehicles(id),
+    trip_id         INTEGER REFERENCES trips(id),
+    latitude        NUMERIC(10, 7) NOT NULL,
+    longitude       NUMERIC(10, 7) NOT NULL,
+    message         TEXT,
+    resolved        BOOLEAN DEFAULT FALSE,
+    resolved_by     INTEGER REFERENCES users(id),
+    resolved_at     TIMESTAMPTZ,
+    triggered_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- PROOF OF DELIVERY
+-- ============================================================
+
+CREATE TABLE delivery_proofs (
+    id              SERIAL PRIMARY KEY,
+    drop_point_id   INTEGER NOT NULL REFERENCES order_drop_points(id) ON DELETE CASCADE,
+    trip_id         INTEGER NOT NULL REFERENCES trips(id),
+    driver_id       INTEGER NOT NULL REFERENCES users(id),
+    proof_type      proof_type NOT NULL,
+    file_url        TEXT,                              -- uploaded photo or signature
+    digital_confirmation_code VARCHAR(100),
+    latitude        NUMERIC(10, 7),
+    longitude       NUMERIC(10, 7),
+    submitted_at    TIMESTAMPTZ DEFAULT NOW(),
+    verified_by     INTEGER REFERENCES users(id),      -- fleet manager
+    verified_at     TIMESTAMPTZ
+);
+
+-- ============================================================
+-- INDEXES FOR PERFORMANCE
+-- ============================================================
+
+CREATE INDEX idx_trips_driver ON trips(driver_id);
+CREATE INDEX idx_trips_vehicle ON trips(vehicle_id);
+CREATE INDEX idx_trips_order ON trips(order_id);
+CREATE INDEX idx_trips_status ON trips(status);
+CREATE INDEX idx_orders_status ON orders(status);
+CREATE INDEX idx_vehicle_issues_vehicle ON vehicle_issues(vehicle_id, status);
+CREATE INDEX idx_maintenance_records_vehicle ON maintenance_records(vehicle_id);
+CREATE INDEX idx_inspections_vehicle ON inspections(vehicle_id);
+CREATE INDEX idx_fuel_logs_vehicle ON fuel_logs(vehicle_id);
+CREATE INDEX idx_trip_expenses_trip ON trip_expenses(trip_id);
