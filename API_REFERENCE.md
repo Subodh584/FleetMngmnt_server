@@ -559,6 +559,31 @@ Header: Authorization: Bearer <access_token>
 ### DELETE `/api/v1/trips/orders/{id}/` — Delete Order
 **Auth:** Bearer Token (fleet_manager only)
 
+### PATCH `/api/v1/trips/orders/{id}/drop_points/` — Replace All Drop Points
+**Auth:** Bearer Token (fleet_manager only)  
+**Note:** Deletes all existing drop points for the order and replaces them with the provided list. Sequence numbers must be unique within the list.
+```json
+{
+    "drop_points": [
+        {
+            "location_id": 2,                      // required, FK → Location ID
+            "sequence_no": 1,                      // required, integer (must be unique)
+            "contact_name": "Rajesh Kumar",        // optional
+            "contact_phone": "+91-9876543210",     // optional
+            "notes": "Ring bell twice"             // optional
+        },
+        {
+            "location_id": 5,
+            "sequence_no": 2,
+            "contact_name": "Priya Sharma",
+            "contact_phone": "+91-9876543211",
+            "notes": ""
+        }
+    ]
+}
+```
+**Response:** Full order object with updated `drop_points` array.
+
 ---
 
 ## 11. Order Drop Points
@@ -612,8 +637,62 @@ Header: Authorization: Bearer <access_token>
 **Search:** `?search=ORD-001`
 **Ordering:** `?ordering=-created_at` `?ordering=scheduled_start`
 
-### GET `/api/v1/trips/trips/{id}/` — Get Trip Detail (includes route_detail)
+### GET `/api/v1/trips/trips/{id}/` — Get Trip Detail
 **Auth:** Bearer Token
+
+Returns trip data including `source` (departure warehouse) and `destinations` (all ordered drop points), giving the driver a full trip briefing in a single call.
+
+**Response includes:**
+```json
+{
+    "id": 1,
+    "status": "assigned",
+    "scheduled_start": "2024-06-15T08:00:00Z",
+    "source": {
+        "id": 1,
+        "name": "Mumbai Warehouse",
+        "address": "123 Industrial Area, Mumbai",
+        "latitude": "19.0760000",
+        "longitude": "72.8777000",
+        "is_warehouse": true
+    },
+    "destinations": [
+        {
+            "id": 1,
+            "sequence_no": 1,
+            "location": {
+                "id": 2,
+                "name": "Pune Drop Point",
+                "address": "456 MG Road, Pune",
+                "latitude": "18.5204300",
+                "longitude": "73.8567400",
+                "is_warehouse": false
+            },
+            "contact_name": "Rajesh Kumar",
+            "contact_phone": "+91-9876543210",
+            "notes": "Ring bell twice",
+            "status": "pending",
+            "eta": null,
+            "arrived_at": null,
+            "delivered_at": null
+        }
+    ],
+    "route_detail": { ... },
+    "order": 1,
+    "vehicle": 1,
+    "driver": 2,
+    "assigned_by": 3,
+    "start_mileage_km": null,
+    "end_mileage_km": null,
+    "started_at": null,
+    "ended_at": null,
+    "created_at": "...",
+    "updated_at": "..."
+}
+```
+
+> `source` — the warehouse the trip departs from (from the linked order).
+> `destinations` — all drop points in delivery sequence order. Each contains the full location (address + coordinates) and contact details.
 
 ### POST `/api/v1/trips/trips/` — Create Trip
 **Auth:** Bearer Token

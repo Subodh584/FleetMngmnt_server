@@ -52,6 +52,19 @@ class OrderDropPointWriteSerializer(serializers.Serializer):
     notes = serializers.CharField(required=False, default='')
 
 
+class BulkDropPointSerializer(serializers.Serializer):
+    """Used for PATCH /orders/{id}/drop_points/ — replaces all drop points."""
+    drop_points = OrderDropPointWriteSerializer(many=True)
+
+    def validate_drop_points(self, value):
+        if not value:
+            raise serializers.ValidationError('drop_points must contain at least one entry.')
+        seq_nums = [item['sequence_no'] for item in value]
+        if len(seq_nums) != len(set(seq_nums)):
+            raise serializers.ValidationError('sequence_no values must be unique within the list.')
+        return value
+
+
 class OrderSerializer(serializers.ModelSerializer):
     drop_points = OrderDropPointSerializer(many=True, read_only=True)
 

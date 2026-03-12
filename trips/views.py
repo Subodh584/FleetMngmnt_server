@@ -10,6 +10,7 @@ from .models import (
 )
 from .serializers import (
     OrderSerializer, OrderCreateSerializer, OrderDropPointSerializer,
+    BulkDropPointSerializer,
     TripSerializer, TripCreateSerializer, RouteSerializer,
     RouteDeviationSerializer, GpsLogSerializer, GeofenceEventSerializer,
     TripExpenseSerializer, FuelLogSerializer, DeliveryProofSerializer,
@@ -31,6 +32,37 @@ class OrderViewSet(viewsets.ModelViewSet):
         if self.action == 'create':
             return OrderCreateSerializer
         return OrderSerializer
+
+    @action(detail=True, methods=['patch'], url_path='drop_points', url_name='set_drop_points')
+    def set_drop_points(self, request, pk=None):
+        """
+        Replace all drop points for an order in one call.
+        Accepts { "drop_points": [ { location_id, sequence_no, ... }, ... ] }
+        """
+        order = self.get_object()
+        serializer = BulkDropPointSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        new_drop_points = serializer.validated_data['drop_points']
+
+        # Delete existing and recreate atomically
+        from django.db import transaction
+        with transaction.atomic():
+            order.drop_points.all().delete()
+            OrderDropPoint.objects.bulk_create([
+                OrderDropPoint(
+                    order=order,
+                    location_id=dp['location_id'],
+                    sequence_no=dp['sequence_no'],
+                    contact_name=dp.get('contact_name', ''),
+                    contact_phone=dp.get('contact_phone', ''),
+                    notes=dp.get('notes', ''),
+                )
+                for dp in new_drop_points
+            ])
+
+        order.refresh_from_db()
+        return Response(OrderSerializer(order).data)
 
 
 class OrderDropPointViewSet(viewsets.ModelViewSet):
