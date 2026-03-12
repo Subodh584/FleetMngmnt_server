@@ -1,9 +1,36 @@
 from rest_framework import serializers
 
+from core.models import Location
 from .models import (
     Order, OrderDropPoint, Trip, Route, RouteDeviation,
     GpsLog, GeofenceEvent, TripExpense, FuelLog, DeliveryProof,
 )
+
+
+# ---------------------------------------------------------------------------
+# Inline location (used inside trip briefing)
+# ---------------------------------------------------------------------------
+
+class InlineLocationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Location
+        fields = ['id', 'name', 'address', 'latitude', 'longitude', 'is_warehouse']
+
+
+# ---------------------------------------------------------------------------
+# Inline drop point (used inside trip briefing destinations)
+# ---------------------------------------------------------------------------
+
+class InlineDropPointSerializer(serializers.ModelSerializer):
+    location = InlineLocationSerializer(read_only=True)
+
+    class Meta:
+        model = OrderDropPoint
+        fields = [
+            'id', 'sequence_no', 'location',
+            'contact_name', 'contact_phone', 'notes',
+            'status', 'eta', 'arrived_at', 'delivered_at',
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -76,11 +103,29 @@ class RouteSerializer(serializers.ModelSerializer):
 
 class TripSerializer(serializers.ModelSerializer):
     route_detail = RouteSerializer(read_only=True)
+    source = serializers.SerializerMethodField()
+    destinations = serializers.SerializerMethodField()
 
     class Meta:
         model = Trip
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at']
+
+    def get_source(self, obj):
+        """Warehouse the trip departs from."""
+        try:
+            warehouse = obj.order.warehouse
+            return InlineLocationSerializer(warehouse).data
+        except Exception:
+            return None
+
+    def get_destinations(self, obj):
+        """All ordered drop points for the trip's order."""
+        try:
+            drop_points = obj.order.drop_points.select_related('location').order_by('sequence_no')
+            return InlineDropPointSerializer(drop_points, many=True).data
+        except Exception:
+            return []
 
 
 class TripCreateSerializer(serializers.ModelSerializer):

@@ -46,7 +46,9 @@ class OrderDropPointViewSet(viewsets.ModelViewSet):
 
 class TripViewSet(viewsets.ModelViewSet):
     queryset = Trip.objects.select_related(
-        'order', 'vehicle', 'driver', 'assigned_by', 'route_detail',
+        'order', 'order__warehouse', 'vehicle', 'driver', 'assigned_by', 'route_detail',
+    ).prefetch_related(
+        'order__drop_points', 'order__drop_points__location',
     ).all()
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['status', 'driver', 'vehicle', 'order']
