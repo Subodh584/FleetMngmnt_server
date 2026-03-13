@@ -20,6 +20,7 @@ class UserProfile(models.Model):
     phone = models.CharField(max_length=20, blank=True, default='')
     profile_photo = models.ImageField(upload_to='profile_photos/', blank=True, null=True)
     is_active = models.BooleanField(default=True)
+    first_time_login = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -60,6 +60,31 @@ Header: Authorization: Bearer <access_token>
 }
 ```
 **Response:** Returns user object + `tokens.access` and `tokens.refresh`
+```json
+{
+    "user": {
+        "id": 1,
+        "username": "john_driver",
+        "email": "john@example.com",
+        "first_name": "John",
+        "last_name": "Doe",
+        "profile": {
+            "role": "driver",
+            "phone": "+91-9876543210",
+            "profile_photo": null,
+            "is_active": true,
+            "first_time_login": true,     // true for newly registered users
+            "created_at": "...",
+            "updated_at": "..."
+        }
+    },
+    "tokens": {
+        "access": "<access_token>",
+        "refresh": "<refresh_token>"
+    }
+}
+```
+> `first_time_login` is `true` for every newly created user. The client should set it to `false` (via profile update) after the user completes onboarding.
 
 ---
 
@@ -93,6 +118,25 @@ Header: Authorization: Bearer <access_token>
 
 ### GET `/api/v1/auth/me/` — Get Current User Profile
 **Auth:** Bearer Token
+**Response:**
+```json
+{
+    "id": 1,
+    "username": "john_driver",
+    "email": "john@example.com",
+    "first_name": "John",
+    "last_name": "Doe",
+    "profile": {
+        "role": "driver",
+        "phone": "+91-9876543210",
+        "profile_photo": null,
+        "is_active": true,
+        "first_time_login": false,
+        "created_at": "...",
+        "updated_at": "..."
+    }
+}
+```
 
 ---
 
@@ -132,6 +176,7 @@ Header: Authorization: Bearer <access_token>
 **Auth:** Bearer Token
 
 > Users endpoint is **read-only**.
+> Each user object includes a nested `profile` with `role`, `phone`, `profile_photo`, `is_active`, `first_time_login`, `created_at`, and `updated_at`.
 
 ---
 
