@@ -89,12 +89,34 @@ ASGI_APPLICATION = 'app.asgi.application'
 # Database – PostgreSQL
 # ---------------------------------------------------------------------------
 
-DATABASES = {
-    'default': dj_database_url.config(
-        default='postgresql://user62:Archanachauhan%40123@localhost:5432/fleet_management',
-        conn_max_age=600,
-    )
+# ---------------------------------------------------------------------------
+# Database connection pooling for Supabase PgBouncer (transaction mode)
+#
+# IMPORTANT: Supabase pooler (port 6543) runs PgBouncer in TRANSACTION mode.
+# Django's persistent connections (conn_max_age > 0) are INCOMPATIBLE with
+# PgBouncer transaction mode — they exhaust the pool and cause "Max client
+# connections reached". We must set conn_max_age=0 and let PgBouncer handle
+# pooling server-side.
+# ---------------------------------------------------------------------------
+
+_db_config = dj_database_url.config(
+    default='postgresql://user62:Archanachauhan%40123@localhost:5432/fleet_management',
+    conn_max_age=0,          # Do NOT keep persistent connections — required for PgBouncer transaction mode
+    conn_health_checks=False, # Skip health-check pings (saves one query per request)
+)
+
+# Limit how many connections this Django process can hold open concurrently.
+# Supabase free tier allows ~20-25 pooler connections total across all clients.
+# Keep this low if you run multiple workers/dynos (e.g. 2 workers × 5 = 10 max).
+_db_config.setdefault('OPTIONS', {})
+_db_config['OPTIONS']['pool'] = {
+    'min_size': 1,
+    'max_size': int(os.environ.get('DB_POOL_MAX_SIZE', '5')),
+    'timeout': 30,
+    'max_waiting': 10,
 }
+
+DATABASES = {'default': _db_config}
 
 # ---------------------------------------------------------------------------
 # Password validation
