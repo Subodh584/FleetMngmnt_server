@@ -121,6 +121,26 @@ Header: Authorization: Bearer <access_token>
 
 ---
 
+### POST `/api/v1/auth/send-credentials/` — Send Credentials via Email
+**Auth:** Bearer Token
+```json
+{
+    "email": "user@example.com",       // required, recipient email address
+    "userid": "john_driver",           // required, username to send
+    "password": "securepass123"        // required, password to send
+}
+```
+**Response (200):**
+```json
+{
+    "detail": "Credentials sent successfully to user@example.com."
+}
+```
+**Error (400):** Missing fields → returns field-level errors.
+**Error (500):** Email delivery failure → `{"detail": "Failed to send email: ..."}`
+
+---
+
 ## 2. Users
 
 ### GET `/api/v1/users/` — List Users
@@ -613,7 +633,7 @@ Header: Authorization: Bearer <access_token>
 ```
 
 ### PATCH `/api/v1/trips/drop-points/{id}/` — Partial Update
-**Auth:** Bearer Token
+**Auth:** Bearer Token-
 ```json
 {
     "status": "arrived",

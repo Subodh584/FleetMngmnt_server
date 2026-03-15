@@ -103,20 +103,20 @@ class SendCredentialsEmailView(APIView):
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
         # Build the email
-        subject = 'Your Fleet Management Login Credentials'
+        subject = 'Your Ochima Login Credentials'
         plain_message = (
             f'Hello,\n\n'
-            f'Here are your login credentials for the Fleet Management System:\n\n'
+            f'Here are your login credentials for Ochima:\n\n'
             f'Username: {userid}\n'
             f'Password: {password}\n\n'
             f'Please change your password after your first login.\n\n'
             f'Regards,\n'
-            f'Fleet Management Team'
+            f'Ochima Team'
         )
         html_message = (
             f'<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;'
             f'padding:24px;border:1px solid #e0e0e0;border-radius:8px;">'
-            f'<h2 style="color:#1a73e8;">Fleet Management</h2>'
+            f'<h2 style="color:#1a73e8;">Ochima</h2>'
             f'<p>Hello,</p>'
             f'<p>Here are your login credentials:</p>'
             f'<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
@@ -128,7 +128,7 @@ class SendCredentialsEmailView(APIView):
             f'<p style="color:#d32f2f;font-size:14px;">'
             f'Please change your password after your first login.</p>'
             f'<hr style="border:none;border-top:1px solid #e0e0e0;margin:16px 0;">'
-            f'<p style="font-size:12px;color:#888;">Fleet Management Team</p>'
+            f'<p style="font-size:12px;color:#888;">Ochima Team</p>'
             f'</div>'
         )
 
