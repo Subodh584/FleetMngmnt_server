@@ -1,6 +1,9 @@
 from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
+from django.conf import settings
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Geofence, Location, UserProfile
@@ -78,6 +81,75 @@ class ChangePasswordView(generics.GenericAPIView):
         return Response({'detail': 'Password updated successfully.'})
 
 
+class SendCredentialsEmailView(APIView):
+    """Send user credentials (userid & password) to the given email address."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        email = request.data.get('email')
+        userid = request.data.get('userid')
+        password = request.data.get('password')
+
+        # Validate required fields
+        errors = {}
+        if not email:
+            errors['email'] = 'This field is required.'
+        if not userid:
+            errors['userid'] = 'This field is required.'
+        if not password:
+            errors['password'] = 'This field is required.'
+        if errors:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # Build the email
+        subject = 'Your Fleet Management Login Credentials'
+        plain_message = (
+            f'Hello,\n\n'
+            f'Here are your login credentials for the Fleet Management System:\n\n'
+            f'Username: {userid}\n'
+            f'Password: {password}\n\n'
+            f'Please change your password after your first login.\n\n'
+            f'Regards,\n'
+            f'Fleet Management Team'
+        )
+        html_message = (
+            f'<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;'
+            f'padding:24px;border:1px solid #e0e0e0;border-radius:8px;">'
+            f'<h2 style="color:#1a73e8;">Fleet Management</h2>'
+            f'<p>Hello,</p>'
+            f'<p>Here are your login credentials:</p>'
+            f'<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
+            f'<tr><td style="padding:8px;font-weight:bold;">Username</td>'
+            f'<td style="padding:8px;">{userid}</td></tr>'
+            f'<tr style="background:#f5f5f5;"><td style="padding:8px;font-weight:bold;">Password</td>'
+            f'<td style="padding:8px;">{password}</td></tr>'
+            f'</table>'
+            f'<p style="color:#d32f2f;font-size:14px;">'
+            f'Please change your password after your first login.</p>'
+            f'<hr style="border:none;border-top:1px solid #e0e0e0;margin:16px 0;">'
+            f'<p style="font-size:12px;color:#888;">Fleet Management Team</p>'
+            f'</div>'
+        )
+
+        try:
+            send_mail(
+                subject=subject,
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                html_message=html_message,
+                fail_silently=False,
+            )
+        except Exception as e:
+            return Response(
+                {'detail': f'Failed to send email: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response({'detail': f'Credentials sent successfully to {email}.'})
+
+
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
     """List / retrieve users (fleet managers can see all)."""
 
@@ -112,3 +184,4 @@ class GeofenceViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+

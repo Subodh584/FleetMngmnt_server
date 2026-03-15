@@ -16,6 +16,7 @@ urlpatterns = [
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     path('auth/me/', views.MeView.as_view(), name='auth-me'),
     path('auth/change-password/', views.ChangePasswordView.as_view(), name='auth-change-password'),
+    path('auth/send-credentials/', views.SendCredentialsEmailView.as_view(), name='auth-send-credentials'),
     # Router URLs
     path('', include(router.urls)),
 ]
