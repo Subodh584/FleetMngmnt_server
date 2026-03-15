@@ -105,17 +105,6 @@ _db_config = dj_database_url.config(
     conn_health_checks=False, # Skip health-check pings (saves one query per request)
 )
 
-# Limit how many connections this Django process can hold open concurrently.
-# Supabase free tier allows ~20-25 pooler connections total across all clients.
-# Keep this low if you run multiple workers/dynos (e.g. 2 workers × 5 = 10 max).
-_db_config.setdefault('OPTIONS', {})
-_db_config['OPTIONS']['pool'] = {
-    'min_size': 1,
-    'max_size': int(os.environ.get('DB_POOL_MAX_SIZE', '5')),
-    'timeout': 30,
-    'max_waiting': 10,
-}
-
 DATABASES = {'default': _db_config}
 
 # ---------------------------------------------------------------------------
