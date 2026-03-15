@@ -78,6 +78,13 @@ class ChangePasswordView(generics.GenericAPIView):
         serializer.is_valid(raise_exception=True)
         request.user.set_password(serializer.validated_data['new_password'])
         request.user.save()
+        
+        # Automatically mark first_time_login as False on password change
+        profile = request.user.profile
+        if profile.first_time_login:
+            profile.first_time_login = False
+            profile.save(update_fields=['first_time_login'])
+            
         return Response({'detail': 'Password updated successfully.'})
 
 

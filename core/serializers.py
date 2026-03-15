@@ -65,6 +65,7 @@ class UserProfileUpdateSerializer(serializers.Serializer):
     email = serializers.EmailField(required=False)
     phone = serializers.CharField(max_length=20, required=False)
     profile_photo = serializers.ImageField(required=False)
+    first_time_login = serializers.BooleanField(required=False)
 
     def update(self, user, validated_data):
         user.first_name = validated_data.get('first_name', user.first_name)
@@ -76,6 +77,8 @@ class UserProfileUpdateSerializer(serializers.Serializer):
             profile.phone = validated_data['phone']
         if 'profile_photo' in validated_data:
             profile.profile_photo = validated_data['profile_photo']
+        if 'first_time_login' in validated_data:
+            profile.first_time_login = validated_data['first_time_login']
         profile.save()
         return user
 

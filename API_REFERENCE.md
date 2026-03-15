@@ -103,7 +103,8 @@ Header: Authorization: Bearer <access_token>
     "first_name": "John",          // optional
     "last_name": "Doe",            // optional
     "email": "newemail@example.com", // optional
-    "phone": "+91-9876543210"      // optional
+    "phone": "+91-9876543210",     // optional
+    "first_time_login": false      // optional, boolean
 }
 ```
 > For `profile_photo` upload, use `multipart/form-data`
@@ -118,6 +119,7 @@ Header: Authorization: Bearer <access_token>
     "new_password": "newsecurepass456"
 }
 ```
+> **Note:** Successfully changing the password will automatically set the user's `first_time_login` flag to `false`.
 
 ---
 
