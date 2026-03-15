@@ -41,6 +41,7 @@ Header: Authorization: Bearer <access_token>
 24. [Notifications](#24-notifications)
 25. [SOS Alerts](#25-sos-alerts)
 26. [WebSocket Endpoints](#26-websocket-endpoints)
+27. [Driver Availability — Clock-In & Clock-Out](#27-driver-availability--clock-in--clock-out)
 
 ---
 
@@ -108,6 +109,26 @@ Header: Authorization: Bearer <access_token>
 }
 ```
 > For `profile_photo` upload, use `multipart/form-data`
+
+**`GET /api/v1/auth/me/` response shape includes:**
+```json
+{
+    "id": 2,
+    "username": "john_driver",
+    "email": "john@example.com",
+    "first_name": "John",
+    "last_name": "Doe",
+    "profile": {
+        "role": "driver",
+        "phone": "+91-9876543210",
+        "profile_photo": null,
+        "is_active": true,
+        "first_time_login": false,
+        "driver_status": "available",   // "available" | "in_trip" | "clocked_out"
+        "created_at": "...",
+        "updated_at": "..."
+    }
+}
 
 ---
 
@@ -1460,6 +1481,87 @@ ws://localhost:8000/ws/chat/{trip_id}/?token=<access_token>
     "message": "Reached the first drop point"
 }
 ```
+
+---
+
+## 27. Driver Availability — Clock-In & Clock-Out
+
+**Permission:** Any authenticated user (intended for drivers).
+
+Drivers have a `driver_status` on their profile that the fleet manager uses to track field availability. This status is managed via the clock-in/out endpoints and is automatically synced when a trip starts or completes.
+
+### Driver Status Values
+
+| Value | Meaning |
+|---|---|
+| `clocked_out` | Driver is off duty. Default on registration. |
+| `available` | Driver is on duty and ready for a trip. |
+| `in_trip` | Driver is actively executing a trip. |
+
+> `driver_status` is visible on every user/profile response via `profile.driver_status`.
+
+---
+
+### POST `/api/v1/auth/clock-in/` — Driver Clock In
+**Auth:** Bearer Token  
+**Body:** *(none required)*
+
+**Response (200):**
+```json
+{
+    "driver_status": "available",
+    "detail": "Clocked in successfully. You are now available."
+}
+```
+**Error (400):** If `driver_status` is currently `in_trip`:
+```json
+{
+    "detail": "Cannot clock in while on an active trip. Complete the trip first."
+}
+```
+> **Side effect:** Sets `profile.driver_status = 'available'`. Idempotent if already `available`.
+
+---
+
+### POST `/api/v1/auth/clock-out/` — Driver Clock Out
+**Auth:** Bearer Token  
+**Body:** *(none required)*
+
+**Response (200):**
+```json
+{
+    "driver_status": "clocked_out",
+    "detail": "Clocked out successfully. You are now unavailable."
+}
+```
+**Error (400):** If `driver_status` is currently `in_trip`:
+```json
+{
+    "detail": "Cannot clock out while on an active trip. Complete the trip first."
+}
+```
+> **Side effect:** Sets `profile.driver_status = 'clocked_out'`. Idempotent if already `clocked_out`.
+
+---
+
+### Automatic Status Transitions via Trip Lifecycle
+
+| Trigger | Endpoint | `driver_status` → |
+|---|---|---|
+| Driver starts trip | `POST /trips/trips/{id}/start/` | `in_trip` |
+| Driver completes trip | `POST /trips/trips/{id}/complete/` | `available` |
+| Trip cancelled | `POST /trips/trips/{id}/cancel/` | `available` |
+
+---
+
+### Filter Drivers by Availability (Fleet Manager)
+
+```
+GET /api/v1/users/?profile__driver_status=available
+GET /api/v1/users/?profile__driver_status=in_trip
+GET /api/v1/users/?profile__driver_status=clocked_out
+```
+> Combine with `?profile__role=driver` to scope to drivers only.
 
 ---
 

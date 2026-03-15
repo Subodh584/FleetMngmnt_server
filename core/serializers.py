@@ -13,7 +13,7 @@ User = get_user_model()
 class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
-        fields = ['role', 'phone', 'profile_photo', 'is_active', 'first_time_login', 'created_at', 'updated_at']
+        fields = ['role', 'phone', 'profile_photo', 'is_active', 'first_time_login', 'driver_status', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
 
 

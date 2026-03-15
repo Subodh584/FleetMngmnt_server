@@ -16,11 +16,22 @@ class UserProfile(models.Model):
         on_delete=models.CASCADE,
         related_name='profile',
     )
+    DRIVER_STATUS_CHOICES = [
+        ('available', 'Available'),
+        ('in_trip', 'In Trip'),
+        ('clocked_out', 'Clocked Out'),
+    ]
+
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     phone = models.CharField(max_length=20, blank=True, default='')
     profile_photo = models.ImageField(upload_to='profile_photos/', blank=True, null=True)
     is_active = models.BooleanField(default=True)
     first_time_login = models.BooleanField(default=True)
+    driver_status = models.CharField(
+        max_length=20,
+        choices=DRIVER_STATUS_CHOICES,
+        default='clocked_out',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

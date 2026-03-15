@@ -17,6 +17,8 @@ urlpatterns = [
     path('auth/me/', views.MeView.as_view(), name='auth-me'),
     path('auth/change-password/', views.ChangePasswordView.as_view(), name='auth-change-password'),
     path('auth/send-credentials/', views.SendCredentialsEmailView.as_view(), name='auth-send-credentials'),
+    path('auth/clock-in/', views.ClockInView.as_view(), name='auth-clock-in'),
+    path('auth/clock-out/', views.ClockOutView.as_view(), name='auth-clock-out'),
     # Router URLs
     path('', include(router.urls)),
 ]

@@ -157,6 +157,40 @@ class SendCredentialsEmailView(APIView):
         return Response({'detail': f'Credentials sent successfully to {email}.'})
 
 
+class ClockInView(APIView):
+    """Driver clocks in — sets driver_status to 'available'."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        profile = request.user.profile
+        if profile.driver_status == 'in_trip':
+            return Response(
+                {'detail': 'Cannot clock in while on an active trip. Complete the trip first.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        profile.driver_status = 'available'
+        profile.save(update_fields=['driver_status', 'updated_at'])
+        return Response({'driver_status': profile.driver_status, 'detail': 'Clocked in successfully. You are now available.'})
+
+
+class ClockOutView(APIView):
+    """Driver clocks out — sets driver_status to 'clocked_out'."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        profile = request.user.profile
+        if profile.driver_status == 'in_trip':
+            return Response(
+                {'detail': 'Cannot clock out while on an active trip. Complete the trip first.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        profile.driver_status = 'clocked_out'
+        profile.save(update_fields=['driver_status', 'updated_at'])
+        return Response({'driver_status': profile.driver_status, 'detail': 'Clocked out successfully. You are now unavailable.'})
+
+
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
     """List / retrieve users (fleet managers can see all)."""
 
