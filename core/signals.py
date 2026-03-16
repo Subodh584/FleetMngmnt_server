@@ -16,5 +16,5 @@ def create_user_profile(sender, instance, created, **kwargs):
     if created and not hasattr(instance, '_skip_profile_creation'):
         UserProfile.objects.get_or_create(
             user=instance,
-            defaults={'role': 'driver'},
+            defaults={'role': 'driver', 'driver_status': 'clocked_out'},
         )
