@@ -4,6 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from core.permissions import IsFleetManager, IsFleetManagerOrReadOnly
+from fleet.models import Inspection
 from .models import (
     Order, OrderDropPoint, Trip, Route, RouteDeviation,
     GpsLog, GeofenceEvent, TripExpense, FuelLog, DeliveryProof,
@@ -109,6 +110,15 @@ class TripViewSet(viewsets.ModelViewSet):
         trip.start_location_lng = request.data.get('longitude')
         trip.start_mileage_km = request.data.get('start_mileage_km', trip.start_mileage_km)
         trip.save()
+        # Link pre-trip inspection to this trip if provided
+        inspection_id = request.data.get('inspection_id')
+        if inspection_id is not None:
+            try:
+                insp = Inspection.objects.get(pk=inspection_id, driver=request.user)
+                insp.trip = trip
+                insp.save(update_fields=['trip'])
+            except Inspection.DoesNotExist:
+                pass  # invalid or unauthorized inspection_id — don't block trip start
         # Update vehicle status
         trip.vehicle.status = 'in_trip'
         trip.vehicle.save(update_fields=['status', 'updated_at'])
