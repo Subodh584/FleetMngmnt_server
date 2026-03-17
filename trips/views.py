@@ -115,10 +115,6 @@ class TripViewSet(viewsets.ModelViewSet):
         # Update order status
         trip.order.status = 'in_transit'
         trip.order.save(update_fields=['status', 'updated_at'])
-        # Update driver availability status
-        driver_profile = trip.driver.profile
-        driver_profile.driver_status = 'in_trip'
-        driver_profile.save(update_fields=['driver_status', 'updated_at'])
         return Response(TripSerializer(trip).data)
 
     @action(detail=True, methods=['post'])
@@ -147,10 +143,6 @@ class TripViewSet(viewsets.ModelViewSet):
         if not order.trips.exclude(status='completed').exists():
             order.status = 'delivered'
             order.save(update_fields=['status', 'updated_at'])
-        # Reset driver availability status
-        driver_profile = trip.driver.profile
-        driver_profile.driver_status = 'available'
-        driver_profile.save(update_fields=['driver_status', 'updated_at'])
         return Response(TripSerializer(trip).data)
 
     @action(detail=True, methods=['post'])
@@ -166,10 +158,6 @@ class TripViewSet(viewsets.ModelViewSet):
         trip.save()
         trip.vehicle.status = 'available'
         trip.vehicle.save(update_fields=['status', 'updated_at'])
-        # Reset driver availability status
-        driver_profile = trip.driver.profile
-        driver_profile.driver_status = 'available'
-        driver_profile.save(update_fields=['driver_status', 'updated_at'])
         return Response(TripSerializer(trip).data)
 
     @action(detail=True, methods=['get'])
