@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from core.serializers import UserSerializer
 from .models import (
     Vehicle, InspectionChecklist, InspectionChecklistItem,
     Inspection, InspectionResult, VehicleIssue,
@@ -73,7 +74,9 @@ class InspectionCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         results_data = validated_data.pop('results')
         driver = self.context['request'].user
-        inspection = Inspection.objects.create(driver=driver, **validated_data)
+        has_fail = any(r['result'] == 'fail' for r in results_data)
+        overall_status = 'flagged' if has_fail else 'approved'
+        inspection = Inspection.objects.create(driver=driver, overall_status=overall_status, **validated_data)
         result_objects = [
             InspectionResult(
                 inspection=inspection,
@@ -100,3 +103,33 @@ class VehicleIssueSerializer(serializers.ModelSerializer):
         model = VehicleIssue
         fields = '__all__'
         read_only_fields = ['reported_by', 'reported_at', 'updated_at']
+
+
+# ---------------------------------------------------------------------------
+# Detailed serializers for fleet-manager issue view
+# ---------------------------------------------------------------------------
+
+class InspectionResultDetailSerializer(serializers.ModelSerializer):
+    checklist_item_name = serializers.CharField(source='checklist_item.item_name', read_only=True)
+
+    class Meta:
+        model = InspectionResult
+        fields = ['id', 'checklist_item', 'checklist_item_name', 'result', 'notes', 'photo_url']
+
+
+class InspectionDetailSerializer(serializers.ModelSerializer):
+    results = InspectionResultDetailSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Inspection
+        fields = '__all__'
+
+
+class VehicleIssueDetailSerializer(serializers.ModelSerializer):
+    vehicle = VehicleSerializer(read_only=True)
+    reported_by = UserSerializer(read_only=True)
+    inspection = InspectionDetailSerializer(read_only=True)
+
+    class Meta:
+        model = VehicleIssue
+        fields = '__all__'

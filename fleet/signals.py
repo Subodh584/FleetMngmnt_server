@@ -17,17 +17,16 @@ User = get_user_model()
 
 @receiver(post_save, sender=VehicleIssue)
 def vehicle_issue_notification(sender, instance, created, **kwargs):
-    """Notify all maintenance staff when a new vehicle issue is reported."""
+    """Notify all maintenance staff and fleet managers when a new vehicle issue is reported."""
     if not created:
         return
 
-    # Find all maintenance staff
-    maintenance_users = User.objects.filter(
-        profile__role='maintenance_staff', is_active=True,
+    recipients = User.objects.filter(
+        profile__role__in=('maintenance_staff', 'fleet_manager'), is_active=True,
     )
 
     notifications = []
-    for user in maintenance_users:
+    for user in recipients:
         notifications.append(
             Notification(
                 user=user,
@@ -45,7 +44,7 @@ def vehicle_issue_notification(sender, instance, created, **kwargs):
     try:
         channel_layer = get_channel_layer()
         if channel_layer:
-            for user in maintenance_users:
+            for user in recipients:
                 async_to_sync(channel_layer.group_send)(
                     f'user_{user.id}_notifications',
                     {

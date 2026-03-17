@@ -11,7 +11,7 @@ from .serializers import (
     VehicleSerializer, InspectionChecklistSerializer,
     InspectionChecklistItemSerializer, InspectionSerializer,
     InspectionCreateSerializer, InspectionResultSerializer,
-    VehicleIssueSerializer,
+    VehicleIssueSerializer, VehicleIssueDetailSerializer,
 )
 from core.permissions import (
     IsFleetManagerOrReadOnly, IsMaintenanceStaffOrFleetManager,
@@ -49,6 +49,26 @@ class InspectionChecklistViewSet(viewsets.ModelViewSet):
     permission_classes = [IsMaintenanceStaffOrFleetManager]
     filterset_fields = ['is_active']
     search_fields = ['name']
+
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='pre_trip_default',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def pre_trip_default(self, request):
+        """Return the active default Pre-Trip Inspection checklist with items."""
+        checklist = (
+            InspectionChecklist.objects.prefetch_related('items')
+            .filter(name='Pre-Trip Inspection', is_active=True)
+            .first()
+        )
+        if checklist is None:
+            return Response(
+                {'detail': 'No active pre-trip checklist found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(InspectionChecklistSerializer(checklist).data)
 
 
 class InspectionChecklistItemViewSet(viewsets.ModelViewSet):
@@ -89,12 +109,23 @@ class InspectionViewSet(viewsets.ModelViewSet):
 
 
 class VehicleIssueViewSet(viewsets.ModelViewSet):
-    queryset = VehicleIssue.objects.select_related('vehicle', 'reported_by').all()
+    queryset = VehicleIssue.objects.select_related(
+        'vehicle',
+        'reported_by', 'reported_by__profile',
+        'inspection', 'inspection__checklist',
+    ).prefetch_related(
+        'inspection__results__checklist_item',
+    ).all()
     serializer_class = VehicleIssueSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['vehicle', 'reported_by', 'severity', 'status']
     search_fields = ['title', 'description']
     ordering_fields = ['reported_at', 'severity']
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return VehicleIssueDetailSerializer
+        return VehicleIssueSerializer
 
     def perform_create(self, serializer):
         serializer.save(reported_by=self.request.user)
