@@ -56,8 +56,8 @@ class InspectionSerializer(serializers.ModelSerializer):
 class InspectionResultWriteSerializer(serializers.Serializer):
     checklist_item_id = serializers.IntegerField()
     result = serializers.ChoiceField(choices=InspectionResult.RESULT_CHOICES)
-    notes = serializers.CharField(required=False, default='')
-    photo_url = serializers.URLField(required=False, default='')
+    notes = serializers.CharField(required=False, default='', allow_blank=True)
+    photo_url = serializers.URLField(required=False, default='', allow_blank=True)
 
 
 class InspectionCreateSerializer(serializers.ModelSerializer):
