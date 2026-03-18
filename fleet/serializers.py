@@ -126,9 +126,19 @@ class InspectionDetailSerializer(serializers.ModelSerializer):
 
 
 class VehicleIssueDetailSerializer(serializers.ModelSerializer):
-    vehicle = VehicleSerializer(read_only=True)
-    reported_by = UserSerializer(read_only=True)
-    inspection = InspectionDetailSerializer(read_only=True)
+    """
+    Detail serializer used for the retrieve action.
+
+    Foreign-key fields keep their integer IDs (vehicle, reported_by, inspection,
+    assigned_to_manager) so the iOS model can decode them as Int?.
+    Nested objects are placed under *_detail keys so the iOS model can decode
+    them into the matching Optional struct fields (vehicleDetail, reportedByDetail,
+    inspectionDetail, assignedToManagerDetail) without any key conflict.
+    """
+    vehicle_detail = VehicleSerializer(source='vehicle', read_only=True)
+    reported_by_detail = UserSerializer(source='reported_by', read_only=True)
+    inspection_detail = InspectionDetailSerializer(source='inspection', read_only=True)
+    assigned_to_manager_detail = UserSerializer(source='assigned_to_manager', read_only=True)
 
     class Meta:
         model = VehicleIssue

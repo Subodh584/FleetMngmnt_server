@@ -152,6 +152,13 @@ class VehicleIssue(models.Model):
         Inspection, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='issues',
     )
+    # Fleet manager who has taken ownership of this issue.
+    # Null = unacknowledged, visible to all managers.
+    # Auto-set when a manager acknowledges (status → acknowledged).
+    assigned_to_manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='managed_issues',
+    )
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default='')
     severity = models.CharField(max_length=10, choices=SEVERITY_CHOICES, default='medium')

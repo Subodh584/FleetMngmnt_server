@@ -113,12 +113,13 @@ class VehicleIssueViewSet(viewsets.ModelViewSet):
         'vehicle',
         'reported_by', 'reported_by__profile',
         'inspection', 'inspection__checklist',
+        'assigned_to_manager', 'assigned_to_manager__profile',
     ).prefetch_related(
         'inspection__results__checklist_item',
     ).all()
     serializer_class = VehicleIssueSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ['vehicle', 'reported_by', 'severity', 'status']
+    filterset_fields = ['vehicle', 'reported_by', 'severity', 'status', 'assigned_to_manager']
     search_fields = ['title', 'description']
     ordering_fields = ['reported_at', 'severity']
 
@@ -129,3 +130,17 @@ class VehicleIssueViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(reported_by=self.request.user)
+
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        new_status = serializer.validated_data.get('status', instance.status)
+
+        # Auto-assign the current fleet manager when they are the first to acknowledge.
+        if (
+            new_status == 'acknowledged'
+            and instance.status == 'reported'
+            and instance.assigned_to_manager is None
+        ):
+            serializer.save(assigned_to_manager=self.request.user)
+        else:
+            serializer.save()
