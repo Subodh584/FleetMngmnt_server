@@ -6,6 +6,7 @@ Notify maintenance staff when a vehicle issue is reported.
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
@@ -21,9 +22,15 @@ def vehicle_issue_notification(sender, instance, created, **kwargs):
     if not created:
         return
 
-    recipients = User.objects.filter(
-        profile__role__in=('maintenance_staff', 'fleet_manager'), is_active=True,
-    )
+    if instance.assigned_to_manager_id:
+        recipients = User.objects.filter(
+            Q(id=instance.assigned_to_manager_id) | Q(profile__role='maintenance_staff'),
+            is_active=True,
+        )
+    else:
+        recipients = User.objects.filter(
+            profile__role__in=('maintenance_staff', 'fleet_manager'), is_active=True,
+        )
 
     notifications = []
     for user in recipients:

@@ -129,7 +129,13 @@ class VehicleIssueViewSet(viewsets.ModelViewSet):
         return VehicleIssueSerializer
 
     def perform_create(self, serializer):
-        serializer.save(reported_by=self.request.user)
+        inspection = serializer.validated_data.get('inspection')
+        assigned_manager = None
+        if inspection and inspection.trip_id:
+            trip_manager = getattr(inspection.trip, 'assigned_by', None)
+            if trip_manager:
+                assigned_manager = trip_manager
+        serializer.save(reported_by=self.request.user, assigned_to_manager=assigned_manager)
 
     def perform_update(self, serializer):
         instance = serializer.instance
