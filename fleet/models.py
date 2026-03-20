@@ -91,6 +91,10 @@ class Inspection(models.Model):
         max_length=20, choices=STATUS_CHOICES, default='pending',
     )
     notes = models.TextField(blank=True, default='')
+    assigned_to_manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='assigned_inspections',
+    )
     reviewed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='reviewed_inspections',

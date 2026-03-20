@@ -80,10 +80,10 @@ class InspectionChecklistItemViewSet(viewsets.ModelViewSet):
 
 class InspectionViewSet(viewsets.ModelViewSet):
     queryset = Inspection.objects.select_related(
-        'vehicle', 'driver', 'checklist', 'reviewed_by',
+        'vehicle', 'driver', 'checklist', 'reviewed_by', 'assigned_to_manager',
     ).prefetch_related('results').all()
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ['vehicle', 'driver', 'inspection_type', 'overall_status']
+    filterset_fields = ['vehicle', 'driver', 'inspection_type', 'overall_status', 'assigned_to_manager']
     ordering_fields = ['submitted_at', 'created_at']
 
     def get_serializer_class(self):
@@ -131,10 +131,12 @@ class VehicleIssueViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         inspection = serializer.validated_data.get('inspection')
         assigned_manager = None
-        if inspection and inspection.trip_id:
-            trip_manager = getattr(inspection.trip, 'assigned_by', None)
-            if trip_manager:
-                assigned_manager = trip_manager
+        if inspection:
+            # Prefer the manager already stamped on the inspection record
+            if inspection.assigned_to_manager_id:
+                assigned_manager = inspection.assigned_to_manager
+            elif inspection.trip_id and inspection.trip.assigned_by_id:
+                assigned_manager = inspection.trip.assigned_by
         serializer.save(reported_by=self.request.user, assigned_to_manager=assigned_manager)
 
     def perform_update(self, serializer):

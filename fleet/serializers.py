@@ -68,7 +68,8 @@ class InspectionCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Inspection
         fields = [
-            'trip', 'vehicle', 'checklist', 'inspection_type', 'notes', 'results',
+            'trip', 'vehicle', 'checklist', 'inspection_type', 'notes',
+            'assigned_to_manager', 'results',
         ]
 
     def create(self, validated_data):
@@ -76,6 +77,13 @@ class InspectionCreateSerializer(serializers.ModelSerializer):
         driver = self.context['request'].user
         has_fail = any(r['result'] == 'fail' for r in results_data)
         overall_status = 'flagged' if has_fail else 'approved'
+
+        # Derive assigned_to_manager from trip if not explicitly provided
+        if 'assigned_to_manager' not in validated_data or validated_data['assigned_to_manager'] is None:
+            trip = validated_data.get('trip')
+            if trip and trip.assigned_by_id:
+                validated_data['assigned_to_manager'] = trip.assigned_by
+
         inspection = Inspection.objects.create(driver=driver, overall_status=overall_status, **validated_data)
         result_objects = [
             InspectionResult(
