@@ -557,6 +557,22 @@ Header: Authorization: Bearer <access_token>
 
 > **New field:** All vehicle issue responses now include `"approved": false|true` — defaults to `false` on creation, set to `true` via the `/approve/` action above.
 
+#### 🔁 Automatic Vehicle Status Sync (DB Trigger)
+
+A PostgreSQL trigger (`trg_vehicle_status_from_issue`) fires automatically on every **INSERT**, **UPDATE of status**, and **DELETE** on the `vehicle_issues` table and keeps `vehicles.status` in sync without any extra API call.
+
+| Vehicle Issue `status` | Effect on `vehicles.status` |
+|---|---|
+| `reported` | → `under_maintenance` |
+| `acknowledged` | → `under_maintenance` |
+| `in_repair` | → `under_maintenance` |
+| `resolved` | → `available` *(only when no other open issues remain for that vehicle)* |
+| Issue **deleted** | Recalculates — `available` if no open issues remain, otherwise stays `under_maintenance` |
+
+**Multi-issue safety:** The trigger scans **all** open issues for the vehicle before updating its status. Resolving one issue out of two will **not** flip the vehicle to `available` while the other issue is still open.
+
+**Override note:** The trigger fires unconditionally — it will override `in_trip` status too. The fleet manager will see the conflict immediately and can handle it.
+
 ---
 
 ## 10. Orders

@@ -1,7 +1,11 @@
+import secrets
+import string
+
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.conf import settings
 from rest_framework import generics, permissions, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -199,8 +203,20 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = User.objects.select_related('profile').all()
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ['profile__role', 'is_active']
+    filterset_fields = ['profile__role', 'is_active', 'profile__first_time_login']
     search_fields = ['username', 'first_name', 'last_name', 'email']
+
+    @action(detail=True, methods=['post'])
+    def reset_credentials(self, request, pk=None):
+        """Fleet manager resets a user's password and returns the new one."""
+        if not hasattr(request.user, 'profile') or request.user.profile.role != 'fleet_manager':
+            return Response({'detail': 'Not authorized.'}, status=status.HTTP_403_FORBIDDEN)
+        user = self.get_object()
+        chars = string.ascii_letters + string.digits + '!@#$%'
+        new_password = ''.join(secrets.choice(chars) for _ in range(12))
+        user.set_password(new_password)
+        user.save()
+        return Response({'username': user.username, 'password': new_password})
 
 
 # ---------------------------------------------------------------------------
