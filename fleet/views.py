@@ -14,7 +14,7 @@ from .serializers import (
     VehicleIssueSerializer, VehicleIssueDetailSerializer,
 )
 from core.permissions import (
-    IsFleetManagerOrReadOnly, IsMaintenanceStaffOrFleetManager,
+    IsFleetManager, IsFleetManagerOrReadOnly, IsMaintenanceStaffOrFleetManager,
 )
 
 
@@ -107,6 +107,14 @@ class InspectionViewSet(viewsets.ModelViewSet):
         inspection.save()
         return Response(InspectionSerializer(inspection).data)
 
+    @action(detail=True, methods=['post'], permission_classes=[IsFleetManager])
+    def approve(self, request, pk=None):
+        """Fleet manager approves a flagged inspection."""
+        inspection = self.get_object()
+        inspection.approved = True
+        inspection.save(update_fields=['approved'])
+        return Response(InspectionSerializer(inspection).data)
+
 
 class VehicleIssueViewSet(viewsets.ModelViewSet):
     queryset = VehicleIssue.objects.select_related(
@@ -152,3 +160,11 @@ class VehicleIssueViewSet(viewsets.ModelViewSet):
             serializer.save(assigned_to_manager=self.request.user)
         else:
             serializer.save()
+
+    @action(detail=True, methods=['post'], permission_classes=[IsFleetManager])
+    def approve(self, request, pk=None):
+        """Fleet manager approves a vehicle issue."""
+        issue = self.get_object()
+        issue.approved = True
+        issue.save(update_fields=['approved'])
+        return Response(VehicleIssueSerializer(issue).data)

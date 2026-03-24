@@ -9,11 +9,13 @@ router.register(r'order-drop-points', views.OrderDropPointViewSet, basename='ord
 router.register(r'trips', views.TripViewSet, basename='trip')
 router.register(r'routes', views.RouteViewSet, basename='route')
 router.register(r'route-deviations', views.RouteDeviationViewSet, basename='route-deviation')
+router.register(r'driver-locations', views.DriverLocationViewSet, basename='driver-location')
 router.register(r'gps-logs', views.GpsLogViewSet, basename='gps-log')
 router.register(r'geofence-events', views.GeofenceEventViewSet, basename='geofence-event')
 router.register(r'trip-expenses', views.TripExpenseViewSet, basename='trip-expense')
 router.register(r'fuel-logs', views.FuelLogViewSet, basename='fuel-log')
 router.register(r'delivery-proofs', views.DeliveryProofViewSet, basename='delivery-proof')
+router.register(r'odometer-images', views.OdometerImageViewSet, basename='odometer-image')
 
 urlpatterns = [
     path('', include(router.urls)),

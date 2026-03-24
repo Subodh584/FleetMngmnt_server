@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import Geofence, Location, UserProfile
+from .models import DriverDocument, Geofence, Location, ProfileImage, UserProfile
 
 User = get_user_model()
 
@@ -103,6 +103,28 @@ class LocationSerializer(serializers.ModelSerializer):
         model = Location
         fields = '__all__'
         read_only_fields = ['created_at']
+
+
+# ---------------------------------------------------------------------------
+# Driver document serializers
+# ---------------------------------------------------------------------------
+
+class DriverDocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DriverDocument
+        fields = '__all__'
+        read_only_fields = ['user', 'uploaded_at', 'updated_at']
+
+
+# ---------------------------------------------------------------------------
+# Profile image serializers
+# ---------------------------------------------------------------------------
+
+class ProfileImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProfileImage
+        fields = '__all__'
+        read_only_fields = ['user', 'uploaded_at', 'updated_at']
 
 
 # ---------------------------------------------------------------------------

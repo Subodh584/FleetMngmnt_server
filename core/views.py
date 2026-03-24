@@ -6,12 +6,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Geofence, Location, UserProfile
+from .models import DriverDocument, Geofence, Location, ProfileImage, UserProfile
 from .permissions import IsFleetManagerOrReadOnly
 from .serializers import (
     ChangePasswordSerializer,
+    DriverDocumentSerializer,
     GeofenceSerializer,
     LocationSerializer,
+    ProfileImageSerializer,
     UserProfileUpdateSerializer,
     UserRegistrationSerializer,
     UserSerializer,
@@ -199,6 +201,44 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['profile__role', 'is_active']
     search_fields = ['username', 'first_name', 'last_name', 'email']
+
+
+# ---------------------------------------------------------------------------
+# Driver document views
+# ---------------------------------------------------------------------------
+
+class DriverDocumentViewSet(viewsets.ModelViewSet):
+    serializer_class = DriverDocumentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['document_type']
+
+    def get_queryset(self):
+        user = self.request.user
+        # Drivers see only their own documents; fleet managers see all
+        if hasattr(user, 'profile') and user.profile.role == 'fleet_manager':
+            return DriverDocument.objects.select_related('user').all()
+        return DriverDocument.objects.select_related('user').filter(user=user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+
+# ---------------------------------------------------------------------------
+# Profile image views
+# ---------------------------------------------------------------------------
+
+class ProfileImageViewSet(viewsets.ModelViewSet):
+    serializer_class = ProfileImageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if hasattr(user, 'profile') and user.profile.role == 'fleet_manager':
+            return ProfileImage.objects.select_related('user').all()
+        return ProfileImage.objects.select_related('user').filter(user=user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
 
 # ---------------------------------------------------------------------------

@@ -42,6 +42,42 @@ class UserProfile(models.Model):
         return f'{self.user.get_full_name()} ({self.get_role_display()})'
 
 
+class DriverDocument(models.Model):
+    DOCUMENT_TYPE_CHOICES = [
+        ('aadhar', 'Aadhaar Card'),
+        ('driving_license', 'Driving License'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='documents',
+    )
+    document_type = models.CharField(max_length=30, choices=DOCUMENT_TYPE_CHOICES)
+    file = models.FileField(upload_to='driver_documents/')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'driver_documents'
+
+    def __str__(self):
+        return f'{self.get_document_type_display()} – {self.user}'
+
+
+class ProfileImage(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile_image_obj',
+    )
+    image = models.ImageField(upload_to='profile_images/')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'profile_images'
+
+    def __str__(self):
+        return f'Profile image – {self.user}'
+
+
 class Location(models.Model):
     """Warehouses, drop points, and generic locations."""
 

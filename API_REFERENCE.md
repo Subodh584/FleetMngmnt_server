@@ -30,18 +30,22 @@ Header: Authorization: Bearer <access_token>
 13. [Routes](#13-routes)
 14. [Route Deviations](#14-route-deviations)
 15. [GPS Logs](#15-gps-logs)
-16. [Geofence Events](#16-geofence-events)
-17. [Trip Expenses](#17-trip-expenses)
-18. [Fuel Logs](#18-fuel-logs)
-19. [Delivery Proofs](#19-delivery-proofs)
-20. [Maintenance Schedules](#20-maintenance-schedules)
-21. [Maintenance Records](#21-maintenance-records)
-22. [Spare Parts Used](#22-spare-parts-used)
-23. [Messages](#23-messages)
-24. [Notifications](#24-notifications)
-25. [SOS Alerts](#25-sos-alerts)
-26. [WebSocket Endpoints](#26-websocket-endpoints)
-27. [Driver Availability — Clock-In & Clock-Out](#27-driver-availability--clock-in--clock-out)
+16. [Driver Locations (Live Tracking)](#16-driver-locations-live-tracking)
+17. [Geofence Events](#17-geofence-events)
+18. [Trip Expenses](#18-trip-expenses)
+19. [Fuel Logs](#19-fuel-logs)
+20. [Delivery Proofs](#20-delivery-proofs)
+21. [Maintenance Schedules](#21-maintenance-schedules)
+22. [Maintenance Records](#22-maintenance-records)
+23. [Spare Parts Used](#23-spare-parts-used)
+24. [Messages](#24-messages)
+25. [Notifications](#25-notifications)
+26. [SOS Alerts](#26-sos-alerts)
+27. [WebSocket Endpoints](#27-websocket-endpoints)
+28. [Driver Availability — Clock-In & Clock-Out](#28-driver-availability--clock-in--clock-out)
+29. [Driver Documents](#29-driver-documents)
+30. [Profile Images](#30-profile-images)
+31. [Odometer Images](#31-odometer-images)
 
 ---
 
@@ -299,7 +303,8 @@ Header: Authorization: Bearer <access_token>
     "year": 2023,                                   // optional
     "vin": "MALA851CLHM123456",                     // optional, unique, max 100
     "fuel_type": "diesel",                          // optional (default: "")
-    "capacity_kg": 750.00,                          // optional, decimal (10,2)
+    "capacity_kg": 750.00,                          // optional, decimal (10,2) — payload weight capacity
+    "capacity_litre": 5000.00,                      // optional, decimal (10,2) — tank/cargo volume capacity
     "status": "available",                          // optional: "available"|"in_trip"|"idle"|"under_maintenance"
     "current_mileage_km": 15000.00,                 // optional (default: 0)
     "last_service_date": "2024-01-15",              // optional, date YYYY-MM-DD
@@ -479,8 +484,15 @@ Header: Authorization: Bearer <access_token>
 }
 ```
 
+### POST `/api/v1/fleet/inspections/{id}/approve/` — Approve a Flagged Inspection
+**Auth:** Bearer Token (fleet_manager only)
+**Note:** Sets `approved = true` on the inspection. No request body required.
+**Response:** Full inspection object with `"approved": true`.
+
 ### DELETE `/api/v1/fleet/inspections/{id}/` — Delete Inspection
 **Auth:** Bearer Token
+
+> **New field:** All inspection responses now include `"approved": false|true` — defaults to `false` on creation, set to `true` via the `/approve/` action above.
 
 ---
 
@@ -535,8 +547,15 @@ Header: Authorization: Bearer <access_token>
 }
 ```
 
+### POST `/api/v1/fleet/vehicle-issues/{id}/approve/` — Approve a Vehicle Issue
+**Auth:** Bearer Token (fleet_manager only)
+**Note:** Sets `approved = true` on the issue. No request body required.
+**Response:** Full issue object with `"approved": true`.
+
 ### DELETE `/api/v1/fleet/issues/{id}/` — Delete Issue
 **Auth:** Bearer Token
+
+> **New field:** All vehicle issue responses now include `"approved": false|true` — defaults to `false` on creation, set to `true` via the `/approve/` action above.
 
 ---
 
@@ -561,6 +580,8 @@ Header: Authorization: Bearer <access_token>
     "order_ref": "ORD-2024-001",                   // required, unique, max 50
     "warehouse": 1,                                // required, FK → Location ID (is_warehouse=true)
     "notes": "Handle with care",                   // optional
+    "capacity_litre": 2000.00,                     // optional, decimal (10,2) — cargo volume
+    "capacity_kg": 500.00,                         // optional, decimal (10,2) — cargo weight
     "drop_points": [                               // required, array
         {
             "location_id": 2,                      // required, FK → Location ID
@@ -655,14 +676,19 @@ Header: Authorization: Bearer <access_token>
 }
 ```
 
-### PATCH `/api/v1/trips/drop-points/{id}/` — Partial Update
-**Auth:** Bearer Token-
+### PATCH `/api/v1/trips/drop-points/{id}/` — Mark Drop Point Status (Partial Completion)
+**Auth:** Bearer Token
+**Note:** Drivers use this to mark each stop as they complete it. `arrived_at` and `delivered_at` timestamps are auto-set on status transitions.
 ```json
 {
-    "status": "arrived",
-    "eta": "2024-06-15T11:00:00Z"
+    "status": "arrived"      // "pending"|"in_transit"|"arrived"|"delivered"|"failed"
 }
 ```
+**Multi-destination workflow:**
+1. Driver arrives at Drop #1 → `PATCH` with `{"status": "arrived"}` → `arrived_at` auto-set
+2. Driver delivers at Drop #1 → `PATCH` with `{"status": "delivered"}` → `delivered_at` auto-set
+3. Repeat for Drop #2, #3, ...
+4. After last drop → `POST /api/v1/trips/trips/{id}/complete/` to finish the trip
 
 ### DELETE `/api/v1/trips/drop-points/{id}/` — Delete Drop Point
 **Auth:** Bearer Token
@@ -957,7 +983,89 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
 
 ---
 
-## 16. Geofence Events
+## 16. Driver Locations (Live Tracking)
+
+**Permission:** Any authenticated user can read. Only **drivers** can update their location.
+
+Driver locations store the **current** position of a driver on a given trip. Unlike GPS Logs (which keep a full history), this table maintains **one row per trip + driver** — creating it on the first call and updating it on subsequent calls (upsert).
+
+When a driver updates their location via the REST endpoint, the update is also **broadcast to the WebSocket room** (`ws/trips/{trip_id}/gps/`) so fleet managers watching that trip receive the update in real time.
+
+### GET `/api/v1/trips/driver-locations/` — List Driver Locations
+**Auth:** Bearer Token
+**Filters:** `?trip=1` `?driver=1` `?vehicle=1`
+
+**Response (200):**
+```json
+{
+    "count": 1,
+    "next": null,
+    "previous": null,
+    "results": [
+        {
+            "id": 1,
+            "trip": 1,
+            "driver": 3,
+            "vehicle": 2,
+            "latitude": "19.0760000",
+            "longitude": "72.8777000",
+            "speed_kmh": "45.50",
+            "heading_deg": "180.00",
+            "updated_at": "2026-03-22T14:30:00Z"
+        }
+    ]
+}
+```
+
+### GET `/api/v1/trips/driver-locations/{id}/` — Get Driver Location Detail
+**Auth:** Bearer Token
+
+---
+
+### POST `/api/v1/trips/driver-locations/update_location/` — Upsert Driver Location
+**Auth:** Bearer Token (Driver only)
+
+This is the primary endpoint called from the **driver's phone**. It creates a new location entry the first time a driver reports for a trip, and updates the existing entry on all subsequent calls for the same trip + driver.
+
+```json
+{
+    "trip_id": 1,                      // required, FK → Trip ID (must be in_progress, assigned to this driver)
+    "latitude": 19.0760000,           // required, decimal (10,7)
+    "longitude": 72.8777000,          // required, decimal (10,7)
+    "speed_kmh": 45.50,               // optional, decimal (6,2)
+    "heading_deg": 180.00             // optional, decimal (5,2)
+}
+```
+
+**Response (201 — first call / created):**
+```json
+{
+    "id": 1,
+    "trip": 1,
+    "driver": 3,
+    "vehicle": 2,
+    "latitude": "19.0760000",
+    "longitude": "72.8777000",
+    "speed_kmh": "45.50",
+    "heading_deg": "180.00",
+    "updated_at": "2026-03-22T14:30:00Z"
+}
+```
+
+**Response (200 — subsequent calls / updated):**
+> Same shape as above, with updated coordinates and `updated_at`.
+
+**Error (404):** Trip not found.
+**Error (403):** Authenticated user is not the driver for this trip.
+**Error (400):** Trip is not in `in_progress` status.
+
+> **Side effects:**
+> - Upserts a row in the `driver_locations` table (one row per trip + driver).
+> - Broadcasts the location update to the WebSocket channel group `trip_{trip_id}_tracking`, so any fleet manager connected to `ws/trips/{trip_id}/gps/` receives the update instantly.
+
+---
+
+## 17. Geofence Events
 
 **Permission:** Any authenticated user. **READ-ONLY** endpoint.
 
@@ -970,7 +1078,7 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
 
 ---
 
-## 17. Trip Expenses
+## 18. Trip Expenses
 
 **Permission:** Any authenticated user.
 **Note:** `driver` is auto-set to the logged-in user.
@@ -1013,9 +1121,10 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
 
 ---
 
-## 18. Fuel Logs
+## 19. Fuel Logs
 
 **Permission:** Any authenticated user.
+**Note:** `driver` is auto-set to the logged-in user on creation.
 
 ### GET `/api/v1/trips/fuel-logs/` — List Fuel Logs
 **Auth:** Bearer Token
@@ -1030,7 +1139,6 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
 {
     "trip": 1,                         // required, FK → Trip ID
     "vehicle": 1,                      // required, FK → Vehicle ID
-    "driver": 2,                       // required, FK → User ID
     "fuel_amount_liters": 50.00,       // required, decimal (8,2)
     "cost_per_liter": 95.50,           // optional, decimal (8,2)
     "total_cost": 4775.00,             // required, decimal (10,2)
@@ -1057,7 +1165,7 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
 
 ---
 
-## 19. Delivery Proofs
+## 20. Delivery Proofs
 
 **Permission:** Any authenticated user.
 **Note:** `driver` is auto-set to the logged-in user.
@@ -1100,7 +1208,7 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
 
 ---
 
-## 20. Maintenance Schedules
+## 21. Maintenance Schedules
 
 **Permission:** Maintenance Staff or Fleet Manager only.
 **Note:** `scheduled_by` is auto-set to the logged-in user.
@@ -1145,7 +1253,7 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
 
 ---
 
-## 21. Maintenance Records
+## 22. Maintenance Records
 
 **Permission:** Maintenance Staff or Fleet Manager only.
 **Note:** `assigned_by` is auto-set to the logged-in user. Vehicle status is auto-set to `under_maintenance` on creation.
@@ -1238,7 +1346,7 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
 
 ---
 
-## 22. Spare Parts Used
+## 23. Spare Parts Used
 
 **Permission:** Maintenance Staff or Fleet Manager only.
 
@@ -1280,7 +1388,7 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
 
 ---
 
-## 23. Messages
+## 24. Messages
 
 **Permission:** Any authenticated user. Only sees own sent/received messages.
 **Note:** `sender` is auto-set to the logged-in user.
@@ -1340,7 +1448,7 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
 
 ---
 
-## 24. Notifications
+## 25. Notifications
 
 **Permission:** Any authenticated user. Only sees own notifications.
 
@@ -1401,7 +1509,7 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
 
 ---
 
-## 25. SOS Alerts
+## 26. SOS Alerts
 
 **Permission:** Any authenticated user.
 **Note:** `driver` is auto-set to the logged-in user.
@@ -1446,22 +1554,42 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
 
 ---
 
-## 26. WebSocket Endpoints
+## 27. WebSocket Endpoints
 
 **Protocol:** `ws://` (or `wss://` for production)
 **Auth:** Pass JWT token as query parameter: `?token=<access_token>`
 
 ### GPS Live Tracking
 ```
-ws://localhost:8000/ws/gps/{trip_id}/?token=<access_token>
+ws://localhost:8000/ws/trips/{trip_id}/gps/?token=<access_token>
 ```
-**Send (JSON):**
+
+**How it works:**
+- Both drivers and fleet managers connect to the same WebSocket room for a trip.
+- **Drivers** can send GPS data via WebSocket (saved to `gps_logs` table, broadcast to room).
+- **Fleet managers** connect to the room to receive real-time location updates.
+- Location updates sent via the REST endpoint (`POST /api/v1/trips/driver-locations/update_location/`) are also broadcast to this room, so fleet managers receive updates regardless of whether the driver uses WebSocket or REST.
+
+**Send (Driver → Server, JSON):**
 ```json
 {
     "latitude": 19.0760000,
     "longitude": 72.8777000,
     "speed_kmh": 45.5,
     "heading_deg": 180.0
+}
+```
+
+**Receive (Server → Fleet Manager, JSON):**
+```json
+{
+    "trip_id": 1,
+    "driver_id": 3,
+    "latitude": 19.0760000,
+    "longitude": 72.8777000,
+    "speed_kmh": 45.5,
+    "heading_deg": 180.0,
+    "updated_at": "2026-03-22T14:30:00Z"
 }
 ```
 
@@ -1484,7 +1612,7 @@ ws://localhost:8000/ws/chat/{trip_id}/?token=<access_token>
 
 ---
 
-## 27. Driver Availability — Clock-In & Clock-Out
+## 28. Driver Availability — Clock-In & Clock-Out
 
 **Permission:** Any authenticated user (intended for drivers).
 
@@ -1565,6 +1693,102 @@ GET /api/v1/users/?profile__driver_status=clocked_out
 
 ---
 
+## 29. Driver Documents
+
+**Permission:** Any authenticated user.
+**Note:** `user` is auto-set to the logged-in user. Drivers see only their own documents; fleet managers see all.
+**Content-Type:** `multipart/form-data` (file upload)
+**Upload directory:** `media/driver_documents/`
+
+### GET `/api/v1/driver-documents/` — List Driver Documents
+**Auth:** Bearer Token
+**Filters:** `?document_type=aadhar`
+
+### GET `/api/v1/driver-documents/{id}/` — Get Document Detail
+**Auth:** Bearer Token
+
+### POST `/api/v1/driver-documents/` — Upload Driver Document
+**Auth:** Bearer Token
+**Content-Type:** `multipart/form-data`
+```
+document_type: aadhar          // required: "aadhar"|"driving_license"
+file: <binary file>            // required, file upload (image or PDF)
+```
+
+### PATCH `/api/v1/driver-documents/{id}/` — Update Document
+**Auth:** Bearer Token
+```
+file: <binary file>            // replace the file
+```
+
+### DELETE `/api/v1/driver-documents/{id}/` — Delete Document
+**Auth:** Bearer Token
+
+---
+
+## 30. Profile Images
+
+**Permission:** Any authenticated user.
+**Note:** `user` is auto-set to the logged-in user. Each user can have only one profile image (OneToOne). Drivers see only their own; fleet managers see all.
+**Content-Type:** `multipart/form-data` (file upload)
+**Upload directory:** `media/profile_images/`
+
+### GET `/api/v1/profile-images/` — List Profile Images
+**Auth:** Bearer Token
+
+### GET `/api/v1/profile-images/{id}/` — Get Profile Image Detail
+**Auth:** Bearer Token
+
+### POST `/api/v1/profile-images/` — Upload Profile Image
+**Auth:** Bearer Token
+**Content-Type:** `multipart/form-data`
+```
+image: <binary image file>     // required, image upload
+```
+
+### PATCH `/api/v1/profile-images/{id}/` — Update Profile Image
+**Auth:** Bearer Token
+```
+image: <binary image file>     // replace with new image
+```
+
+### DELETE `/api/v1/profile-images/{id}/` — Delete Profile Image
+**Auth:** Bearer Token
+
+---
+
+## 31. Odometer Images
+
+**Permission:** Any authenticated user.
+**Note:** `driver` is auto-set to the logged-in user.
+**Content-Type:** `multipart/form-data` (file upload)
+**Upload directory:** `media/odometer_images/`
+
+### GET `/api/v1/trips/odometer-images/` — List Odometer Images
+**Auth:** Bearer Token
+**Filters:** `?trip=1` `?vehicle=1` `?driver=1`
+
+### GET `/api/v1/trips/odometer-images/{id}/` — Get Odometer Image Detail
+**Auth:** Bearer Token
+
+### POST `/api/v1/trips/odometer-images/` — Upload Odometer Image
+**Auth:** Bearer Token
+**Content-Type:** `multipart/form-data`
+```
+trip: 1                          // required, FK → Trip ID
+vehicle: 1                       // required, FK → Vehicle ID
+image: <binary image file>       // required, image upload
+odometer_reading_km: 15250.00    // optional, decimal (10,2)
+```
+
+### PATCH `/api/v1/trips/odometer-images/{id}/` — Update Odometer Image
+**Auth:** Bearer Token
+
+### DELETE `/api/v1/trips/odometer-images/{id}/` — Delete Odometer Image
+**Auth:** Bearer Token
+
+---
+
 ## Quick Reference: Pagination
 
 All list endpoints use page-number pagination:
@@ -1607,7 +1831,7 @@ Set this in Postman → **Headers** tab, or use **Authorization** tab → Type: 
 6. **Create Inspection Checklists + Items** (as maintenance_staff/fleet_manager)
 7. **Create Orders** (as fleet_manager) — with drop points
 8. **Create Trips** (as fleet_manager) — assign vehicle + driver
-9. **Start Trip** (as driver) → **Log GPS** → **Complete Trip**
+9. **Start Trip** (as driver) → **Update Driver Location** → **Log GPS** → **Complete Trip**
 10. **Submit Inspections** (as driver) — pre/post trip
 11. **Report Issues** (as driver) → **Create Maintenance Records** (as maintenance_staff)
 12. **Send Messages** / **Trigger SOS** (as driver)

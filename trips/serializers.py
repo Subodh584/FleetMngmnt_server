@@ -4,6 +4,7 @@ from core.models import Location
 from .models import (
     Order, OrderDropPoint, Trip, Route, RouteDeviation,
     GpsLog, GeofenceEvent, TripExpense, FuelLog, DeliveryProof,
+    DriverLocation, OdometerImage,
 )
 
 
@@ -41,7 +42,9 @@ class OrderDropPointSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrderDropPoint
         fields = '__all__'
-        read_only_fields = ['order', 'arrived_at', 'delivered_at', 'created_at']
+        read_only_fields = ['order', 'created_at']
+        # arrived_at / delivered_at are auto-set by the viewset's perform_update
+        # but kept writable at the serializer level so save(**extra) can set them
 
 
 class OrderDropPointWriteSerializer(serializers.Serializer):
@@ -79,7 +82,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Order
-        fields = ['order_ref', 'warehouse', 'notes', 'drop_points']
+        fields = ['order_ref', 'warehouse', 'notes', 'capacity_litre', 'capacity_kg', 'drop_points']
 
     def create(self, validated_data):
         drop_points_data = validated_data.pop('drop_points')
@@ -206,7 +209,26 @@ class FuelLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = FuelLog
         fields = '__all__'
-        read_only_fields = ['logged_at']
+        read_only_fields = ['driver', 'logged_at']
+
+
+# ---------------------------------------------------------------------------
+# Driver location
+# ---------------------------------------------------------------------------
+
+class DriverLocationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DriverLocation
+        fields = '__all__'
+        read_only_fields = ['updated_at']
+
+
+class DriverLocationUpdateSerializer(serializers.Serializer):
+    trip_id = serializers.IntegerField()
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=7)
+    longitude = serializers.DecimalField(max_digits=10, decimal_places=7)
+    speed_kmh = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True)
+    heading_deg = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
 
 
 # ---------------------------------------------------------------------------
@@ -218,3 +240,14 @@ class DeliveryProofSerializer(serializers.ModelSerializer):
         model = DeliveryProof
         fields = '__all__'
         read_only_fields = ['driver', 'submitted_at', 'verified_by', 'verified_at']
+
+
+# ---------------------------------------------------------------------------
+# Odometer images
+# ---------------------------------------------------------------------------
+
+class OdometerImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OdometerImage
+        fields = '__all__'
+        read_only_fields = ['driver', 'recorded_at']

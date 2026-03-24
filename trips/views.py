@@ -1,13 +1,16 @@
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from core.permissions import IsFleetManager, IsFleetManagerOrReadOnly
+from core.permissions import IsDriver, IsFleetManager, IsFleetManagerOrReadOnly
 from fleet.models import Inspection
 from .models import (
     Order, OrderDropPoint, Trip, Route, RouteDeviation,
     GpsLog, GeofenceEvent, TripExpense, FuelLog, DeliveryProof,
+    DriverLocation, OdometerImage,
 )
 from .serializers import (
     OrderSerializer, OrderCreateSerializer, OrderDropPointSerializer,
@@ -15,6 +18,8 @@ from .serializers import (
     TripSerializer, TripCreateSerializer, RouteSerializer,
     RouteDeviationSerializer, GpsLogSerializer, GeofenceEventSerializer,
     TripExpenseSerializer, FuelLogSerializer, DeliveryProofSerializer,
+    DriverLocationSerializer, DriverLocationUpdateSerializer,
+    OdometerImageSerializer,
 )
 
 
@@ -71,6 +76,20 @@ class OrderDropPointViewSet(viewsets.ModelViewSet):
     serializer_class = OrderDropPointSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['order', 'status']
+
+    def perform_update(self, serializer):
+        """Auto-set arrived_at / delivered_at timestamps on status transitions."""
+        new_status = serializer.validated_data.get('status')
+        instance = serializer.instance
+        now = timezone.now()
+
+        extra = {}
+        if new_status == 'arrived' and instance.status != 'arrived':
+            extra['arrived_at'] = now
+        elif new_status == 'delivered' and instance.status != 'delivered':
+            extra['delivered_at'] = now
+
+        serializer.save(**extra)
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +223,90 @@ class TripViewSet(viewsets.ModelViewSet):
 
 
 # ---------------------------------------------------------------------------
+# Driver locations
+# ---------------------------------------------------------------------------
+
+class DriverLocationViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Current driver locations. Drivers upsert via the `update_location` action;
+    fleet managers can list / retrieve via standard GET.
+    """
+    queryset = DriverLocation.objects.select_related('trip', 'driver', 'vehicle').all()
+    serializer_class = DriverLocationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['trip', 'driver', 'vehicle']
+
+    @action(detail=False, methods=['post'], permission_classes=[IsDriver])
+    def update_location(self, request):
+        """
+        Driver calls this endpoint to store / update their current location.
+        Creates a new DriverLocation row on first call for a trip+driver;
+        updates the existing row on subsequent calls.
+        Also broadcasts the update to the WebSocket room for live tracking.
+        """
+        serializer = DriverLocationUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        # Validate trip belongs to this driver and is in progress
+        try:
+            trip = Trip.objects.select_related('vehicle').get(id=data['trip_id'])
+        except Trip.DoesNotExist:
+            return Response(
+                {'detail': 'Trip not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if trip.driver_id != request.user.id:
+            return Response(
+                {'detail': 'You are not the driver for this trip.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if trip.status not in ('in_progress', 'assigned'):
+            return Response(
+                {'detail': 'Trip is not active (must be assigned or in_progress).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Upsert: create on first call, update on subsequent calls
+        location, created = DriverLocation.objects.update_or_create(
+            trip=trip,
+            driver=request.user,
+            defaults={
+                'vehicle': trip.vehicle,
+                'latitude': data['latitude'],
+                'longitude': data['longitude'],
+                'speed_kmh': data.get('speed_kmh'),
+                'heading_deg': data.get('heading_deg'),
+            },
+        )
+
+        # Broadcast to WebSocket room so fleet managers see live updates
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f'trip_{trip.id}_tracking',
+            {
+                'type': 'gps_update',
+                'data': {
+                    'trip_id': trip.id,
+                    'driver_id': request.user.id,
+                    'latitude': float(data['latitude']),
+                    'longitude': float(data['longitude']),
+                    'speed_kmh': float(data['speed_kmh']) if data.get('speed_kmh') else None,
+                    'heading_deg': float(data['heading_deg']) if data.get('heading_deg') else None,
+                    'updated_at': str(location.updated_at),
+                },
+            },
+        )
+
+        return Response(
+            DriverLocationSerializer(location).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -281,6 +384,23 @@ class FuelLogViewSet(viewsets.ModelViewSet):
     serializer_class = FuelLogSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['trip', 'vehicle', 'driver']
+
+    def perform_create(self, serializer):
+        serializer.save(driver=self.request.user)
+
+
+# ---------------------------------------------------------------------------
+# Odometer images
+# ---------------------------------------------------------------------------
+
+class OdometerImageViewSet(viewsets.ModelViewSet):
+    queryset = OdometerImage.objects.select_related('trip', 'vehicle', 'driver').all()
+    serializer_class = OdometerImageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['trip', 'vehicle', 'driver']
+
+    def perform_create(self, serializer):
+        serializer.save(driver=self.request.user)
 
 
 # ---------------------------------------------------------------------------

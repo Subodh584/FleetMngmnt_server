@@ -17,6 +17,7 @@ class Vehicle(models.Model):
     vin = models.CharField(max_length=100, unique=True, null=True, blank=True)
     fuel_type = models.CharField(max_length=30, blank=True, default='')
     capacity_kg = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    capacity_litre = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available')
     current_mileage_km = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     last_service_date = models.DateField(null=True, blank=True)
@@ -91,6 +92,7 @@ class Inspection(models.Model):
         max_length=20, choices=STATUS_CHOICES, default='pending',
     )
     notes = models.TextField(blank=True, default='')
+    approved = models.BooleanField(default=False)
     assigned_to_manager = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='assigned_inspections',
@@ -168,6 +170,7 @@ class VehicleIssue(models.Model):
     severity = models.CharField(max_length=10, choices=SEVERITY_CHOICES, default='medium')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='reported')
     photo_url = models.URLField(blank=True, default='')
+    approved = models.BooleanField(default=False)
     reported_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

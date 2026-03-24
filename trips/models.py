@@ -20,6 +20,8 @@ class Order(models.Model):
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     notes = models.TextField(blank=True, default='')
+    capacity_litre = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    capacity_kg = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -247,6 +249,29 @@ class FuelLog(models.Model):
         return f'Fuel: {self.fuel_amount_liters}L – Trip #{self.trip_id}'
 
 
+class DriverLocation(models.Model):
+    """Current location of a driver on a trip. One row per trip+driver, upserted on each update."""
+    trip = models.ForeignKey(Trip, on_delete=models.CASCADE, related_name='driver_locations')
+    driver = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='driver_locations',
+    )
+    vehicle = models.ForeignKey(
+        'fleet.Vehicle', on_delete=models.CASCADE, related_name='driver_locations',
+    )
+    latitude = models.DecimalField(max_digits=10, decimal_places=7)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7)
+    speed_kmh = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    heading_deg = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'driver_locations'
+        unique_together = [('trip', 'driver')]
+
+    def __str__(self):
+        return f'Location – Driver {self.driver_id} on Trip #{self.trip_id}'
+
+
 class DeliveryProof(models.Model):
     PROOF_TYPE_CHOICES = [
         ('photo', 'Photo'),
@@ -278,3 +303,22 @@ class DeliveryProof(models.Model):
 
     def __str__(self):
         return f'Proof ({self.proof_type}) – Drop #{self.drop_point_id}'
+
+
+class OdometerImage(models.Model):
+    trip = models.ForeignKey(Trip, on_delete=models.CASCADE, related_name='odometer_images')
+    vehicle = models.ForeignKey(
+        'fleet.Vehicle', on_delete=models.CASCADE, related_name='odometer_images',
+    )
+    driver = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='odometer_images',
+    )
+    image = models.ImageField(upload_to='odometer_images/')
+    odometer_reading_km = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'odometer_images'
+
+    def __str__(self):
+        return f'Odometer – Trip #{self.trip_id} – {self.recorded_at}'
