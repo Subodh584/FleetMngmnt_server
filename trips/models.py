@@ -66,6 +66,7 @@ class OrderDropPoint(models.Model):
 
 class Trip(models.Model):
     STATUS_CHOICES = [
+        ('pending', 'Pending'),
         ('assigned', 'Assigned'),
         ('in_progress', 'In Progress'),
         ('completed', 'Completed'),
@@ -94,6 +95,7 @@ class Trip(models.Model):
     start_location_lng = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     end_location_lat = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     end_location_lng = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, default='')
     started_at = models.DateTimeField(null=True, blank=True)
     ended_at = models.DateTimeField(null=True, blank=True)
     scheduled_start = models.DateTimeField(null=True, blank=True)

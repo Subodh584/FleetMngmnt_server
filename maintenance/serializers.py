@@ -1,6 +1,16 @@
 from rest_framework import serializers
 
-from .models import MaintenanceSchedule, MaintenanceRecord, SparePartUsed
+from .models import MaintenanceSchedule, MaintenanceRecord, SparePart, SparePartUsed
+
+
+class SparePartSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SparePart
+        fields = '__all__'
+        read_only_fields = ['total_cost', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'maintenance': {'required': False, 'allow_null': True},
+        }
 
 
 class SparePartUsedSerializer(serializers.ModelSerializer):

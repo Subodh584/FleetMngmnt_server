@@ -172,6 +172,12 @@ class TripViewSet(viewsets.ModelViewSet):
         if not order.trips.exclude(status='completed').exists():
             order.status = 'delivered'
             order.save(update_fields=['status', 'updated_at'])
+        # Set driver to on_rest for 9 hours
+        profile = trip.driver.profile
+        rest_ends = trip.ended_at + timezone.timedelta(hours=9)
+        profile.driver_status = 'on_rest'
+        profile.rest_ends_at = rest_ends
+        profile.save(update_fields=['driver_status', 'rest_ends_at', 'updated_at'])
         return Response(TripSerializer(trip).data)
 
     @action(detail=True, methods=['post'])
@@ -187,6 +193,69 @@ class TripViewSet(viewsets.ModelViewSet):
         trip.save()
         trip.vehicle.status = 'available'
         trip.vehicle.save(update_fields=['status', 'updated_at'])
+        return Response(TripSerializer(trip).data)
+
+    @action(detail=True, methods=['post'])
+    def accept(self, request, pk=None):
+        """Driver accepts an assigned trip — transitions directly to in_progress."""
+        trip = self.get_object()
+        if trip.status != 'assigned':
+            return Response(
+                {'detail': 'Trip can only be accepted from assigned status.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if trip.driver_id != request.user.id:
+            return Response({'detail': 'You are not the driver for this trip.'}, status=status.HTTP_403_FORBIDDEN)
+        trip.status = 'in_progress'
+        trip.started_at = timezone.now()
+        trip.start_location_lat = request.data.get('latitude')
+        trip.start_location_lng = request.data.get('longitude')
+        trip.start_mileage_km = request.data.get('start_mileage_km', trip.start_mileage_km)
+        trip.save()
+        trip.vehicle.status = 'in_trip'
+        trip.vehicle.save(update_fields=['status', 'updated_at'])
+        trip.order.status = 'in_transit'
+        trip.order.save(update_fields=['status', 'updated_at'])
+        profile = request.user.profile
+        profile.driver_status = 'in_trip'
+        profile.save(update_fields=['driver_status', 'updated_at'])
+        return Response(TripSerializer(trip).data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        """Driver rejects an assigned trip — reverts to pending and notifies fleet managers."""
+        trip = self.get_object()
+        if trip.status != 'assigned':
+            return Response(
+                {'detail': 'Trip can only be rejected from assigned status.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if trip.driver_id != request.user.id:
+            return Response({'detail': 'You are not the driver for this trip.'}, status=status.HTTP_403_FORBIDDEN)
+        reason = request.data.get('reason', '')
+        trip.status = 'pending'
+        trip.rejection_reason = reason
+        trip.save()
+        # Free the vehicle
+        trip.vehicle.status = 'available'
+        trip.vehicle.save(update_fields=['status', 'updated_at'])
+        # Notify all fleet managers
+        from comms.models import Notification
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        driver_name = request.user.get_full_name() or request.user.username
+        managers = User.objects.filter(profile__role='fleet_manager')
+        Notification.objects.bulk_create([
+            Notification(
+                user=mgr,
+                alert_type='trip_rejected',
+                title='Trip Rejected',
+                body=f'Driver {driver_name} rejected Trip #{trip.id} (Order {trip.order.order_ref}). Reason: {reason or "No reason given."}',
+                reference_id=trip.pk,
+                reference_type='trip',
+            )
+            for mgr in managers
+        ])
         return Response(TripSerializer(trip).data)
 
     @action(detail=True, methods=['get'])

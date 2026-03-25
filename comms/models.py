@@ -38,6 +38,10 @@ class Notification(models.Model):
         ('geofence_exit', 'Geofence Exit'),
         ('maintenance_due', 'Maintenance Due'),
         ('issue_reported', 'Issue Reported'),
+        ('trip_rejected', 'Trip Rejected'),
+        ('leave_approved', 'Leave Approved'),
+        ('leave_rejected', 'Leave Rejected'),
+        ('leave_request', 'Leave Request'),
     ]
     STATUS_CHOICES = [
         ('unread', 'Unread'),

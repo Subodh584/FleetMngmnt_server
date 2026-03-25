@@ -37,7 +37,7 @@ Header: Authorization: Bearer <access_token>
 20. [Delivery Proofs](#20-delivery-proofs)
 21. [Maintenance Schedules](#21-maintenance-schedules)
 22. [Maintenance Records](#22-maintenance-records)
-23. [Spare Parts Used](#23-spare-parts-used)
+23. [Spare Parts](#23-spare-parts)
 24. [Messages](#24-messages)
 25. [Notifications](#25-notifications)
 26. [SOS Alerts](#26-sos-alerts)
@@ -46,6 +46,8 @@ Header: Authorization: Bearer <access_token>
 29. [Driver Documents](#29-driver-documents)
 30. [Profile Images](#30-profile-images)
 31. [Odometer Images](#31-odometer-images)
+32. [Leave Requests](#32-leave-requests)
+33. [Spare Parts Used (Legacy)](#33-spare-parts-used-legacy)
 
 ---
 
@@ -128,7 +130,10 @@ Header: Authorization: Bearer <access_token>
         "profile_photo": null,
         "is_active": true,
         "first_time_login": false,
-        "driver_status": "available",   // "available" | "in_trip" | "clocked_out"
+        "driver_status": "available",   // "available" | "in_trip" | "clocked_out" | "on_rest" | "on_leave"
+        "rest_ends_at": null,           // ISO datetime — set when driver_status = "on_rest"; null otherwise
+        "driving_licence": null,        // absolute URL of uploaded driving licence file, or null
+        "aadhaar_card": null,           // absolute URL of uploaded aadhaar card file, or null
         "created_at": "...",
         "updated_at": "..."
     }
@@ -716,9 +721,20 @@ A PostgreSQL trigger (`trg_vehicle_status_from_issue`) fires automatically on ev
 **Permission:** Any authenticated user.
 **Note:** `assigned_by` is auto-set to the logged-in user on creation.
 
+**Trip Status Values:**
+
+| Value | Meaning |
+|---|---|
+| `pending` | Created but no driver assigned yet, OR driver rejected the assigned trip |
+| `assigned` | Assigned to a driver, awaiting acceptance |
+| `in_progress` | Driver accepted and started the trip |
+| `completed` | Trip finished |
+| `cancelled` | Trip cancelled |
+| `delayed` | Trip is delayed |
+
 ### GET `/api/v1/trips/trips/` — List Trips
 **Auth:** Bearer Token
-**Filters:** `?status=assigned` `?driver=1` `?vehicle=1` `?order=1`
+**Filters:** `?status=assigned` `?status=pending` `?driver=1` `?vehicle=1` `?order=1`
 **Search:** `?search=ORD-001`
 **Ordering:** `?ordering=-created_at` `?ordering=scheduled_start`
 
@@ -798,7 +814,7 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
     "order": 1,
     "vehicle": 1,
     "driver": 2,
-    "status": "assigned",             // "assigned"|"in_progress"|"completed"|"cancelled"|"delayed"
+    "status": "assigned",             // "pending"|"assigned"|"in_progress"|"completed"|"cancelled"|"delayed"
     "scheduled_start": "2024-06-15T09:00:00Z",
     "start_mileage_km": 15000.00,
     "end_mileage_km": null,
@@ -852,6 +868,49 @@ Returns trip data including `source` (departure warehouse) and `destinations` (a
 {}
 ```
 > No body required.
+
+---
+
+### POST `/api/v1/trips/trips/{id}/accept/` — Accept Trip (Driver)
+**Auth:** Bearer Token (assigned driver only)
+**Precondition:** Trip status must be `assigned`
+```json
+{
+    "latitude": 19.0760000,            // optional
+    "longitude": 72.8777000,           // optional
+    "start_mileage_km": 15000.00       // optional
+}
+```
+**Response (200):** Full trip object with `"status": "in_progress"`.
+
+> **Side effects:** Sets `status=in_progress`, `started_at=now`, vehicle `status=in_trip`, order `status=in_transit`, driver `driver_status=in_trip`. Behaves identically to `/start/` but is named semantically for the driver-acceptance workflow.
+
+---
+
+### POST `/api/v1/trips/trips/{id}/reject/` — Reject Trip (Driver)
+**Auth:** Bearer Token (assigned driver only)
+**Precondition:** Trip status must be `assigned`
+```json
+{
+    "reason": "Vehicle has a flat tyre, cannot proceed"   // optional, rejection reason
+}
+```
+**Response (200):** Full trip object with `"status": "pending"`.
+
+> **Side effects:** Sets `status=pending`, clears `driver` assignment, sets vehicle `status=available`, stores `rejection_reason`. Sends a notification to **all fleet managers** with the driver's rejection reason so they can reassign.
+
+**Notification sent to all fleet managers:**
+```json
+{
+    "alert_type": "trip_rejected",
+    "title": "Trip #<id> rejected by <driver_name>",
+    "body": "<reason>",
+    "reference_id": <trip_id>,
+    "reference_type": "trip"
+}
+```
+
+---
 
 ### GET `/api/v1/trips/trips/{id}/tracking/` — Get Latest GPS Position
 **Auth:** Bearer Token
@@ -1362,9 +1421,12 @@ This is the primary endpoint called from the **driver's phone**. It creates a ne
 
 ---
 
-## 23. Spare Parts Used
+## 23. Spare Parts
 
 **Permission:** Maintenance Staff or Fleet Manager only.
+
+> **Table:** `spare_parts` — This is the primary endpoint for spare part CRUD operations. Data is stored in and retrieved from the `spare_parts` table.
+> **Note:** `quantity` and `unit_cost` are stored as text in the database (to support flexible input) but `total_cost` is auto-calculated as a decimal.
 
 ### GET `/api/v1/maintenance/spare-parts/` — List Spare Parts
 **Auth:** Bearer Token
@@ -1377,14 +1439,30 @@ This is the primary endpoint called from the **driver's phone**. It creates a ne
 **Auth:** Bearer Token (maintenance_staff or fleet_manager)
 ```json
 {
-    "maintenance": 1,                  // required, FK → MaintenanceRecord ID
-    "part_name": "Oil Filter",         // required, max 200
-    "part_number": "OF-001",           // optional, max 100
-    "quantity": 1.00,                  // required, decimal (10,2)
-    "unit_cost": 250.00                // optional, decimal (10,2)
+    "part_name": "Oil Filter",         // required, text
+    "part_number": "OF-001",           // optional, text
+    "quantity": "1",                   // optional, text (auto-used to calculate total_cost)
+    "unit_cost": "250.00",             // optional, text (auto-used to calculate total_cost)
+    "maintenance": 1                   // optional, FK → MaintenanceRecord ID (link to a record if needed)
 }
 ```
-> `total_cost` is auto-calculated.
+> `maintenance` is fully optional — spare parts can exist independently.
+> `total_cost` is auto-calculated as `float(quantity) × float(unit_cost)` when both are provided.
+
+**Response:**
+```json
+{
+    "id": 1,
+    "maintenance": 1,
+    "part_name": "Oil Filter",
+    "part_number": "OF-001",
+    "quantity": "1",
+    "unit_cost": "250.00",
+    "total_cost": "250.00",
+    "created_at": "2026-03-25T10:00:00Z",
+    "updated_at": "2026-03-25T10:00:00Z"
+}
+```
 
 ### PUT `/api/v1/maintenance/spare-parts/{id}/` — Full Update
 **Auth:** Bearer Token (maintenance_staff or fleet_manager)
@@ -1394,8 +1472,8 @@ This is the primary endpoint called from the **driver's phone**. It creates a ne
 **Auth:** Bearer Token (maintenance_staff or fleet_manager)
 ```json
 {
-    "quantity": 2.00,
-    "unit_cost": 275.00
+    "quantity": "2",
+    "unit_cost": "275.00"
 }
 ```
 
@@ -1480,7 +1558,7 @@ This is the primary endpoint called from the **driver's phone**. It creates a ne
 **Auth:** Bearer Token
 ```json
 {
-    "alert_type": "maintenance_due",           // required: "sos"|"route_deviation"|"geofence_entry"|"geofence_exit"|"maintenance_due"|"issue_reported"
+    "alert_type": "maintenance_due",           // required: "sos"|"route_deviation"|"geofence_entry"|"geofence_exit"|"maintenance_due"|"issue_reported"|"trip_rejected"|"leave_request"|"leave_approved"|"leave_rejected"
     "title": "Vehicle MH12AB1234 service due", // required, max 255
     "body": "Current mileage approaching next service threshold", // optional
     "status": "unread",                        // optional: "unread"|"read" (default: "unread")
@@ -1641,8 +1719,13 @@ Drivers have a `driver_status` on their profile that the fleet manager uses to t
 | `clocked_out` | Driver is off duty. Default on registration. |
 | `available` | Driver is on duty and ready for a trip. |
 | `in_trip` | Driver is actively executing a trip. |
+| `on_rest` | Driver completed a trip and is in a mandatory 9-hour rest period. Auto-reverts to `available` when rest ends. |
+| `on_leave` | Driver is on approved leave. Set by fleet manager approving a leave request. |
 
 > `driver_status` is visible on every user/profile response via `profile.driver_status`.
+> `rest_ends_at` is set to `trip.ended_at + 9 hours` when status becomes `on_rest`. It is cleared when status reverts to `available`.
+>
+> **Lazy revert:** There is no background job. When a driver whose `driver_status=on_rest` calls `GET /auth/me/` and `rest_ends_at <= now`, the server automatically flips their status to `available` before returning the response.
 
 ---
 
@@ -1661,6 +1744,12 @@ Drivers have a `driver_status` on their profile that the fleet manager uses to t
 ```json
 {
     "detail": "Cannot clock in while on an active trip. Complete the trip first."
+}
+```
+**Error (400):** If `driver_status` is currently `on_leave`:
+```json
+{
+    "detail": "Cannot clock in while on approved leave."
 }
 ```
 > **Side effect:** Sets `profile.driver_status = 'available'`. Idempotent if already `available`.
@@ -1690,11 +1779,15 @@ Drivers have a `driver_status` on their profile that the fleet manager uses to t
 
 ### Automatic Status Transitions via Trip Lifecycle
 
-| Trigger | Endpoint | `driver_status` → |
-|---|---|---|
-| Driver starts trip | `POST /trips/trips/{id}/start/` | `in_trip` |
-| Driver completes trip | `POST /trips/trips/{id}/complete/` | `available` |
-| Trip cancelled | `POST /trips/trips/{id}/cancel/` | `available` |
+| Trigger | Endpoint | `driver_status` → | Notes |
+|---|---|---|---|
+| Driver accepts trip | `POST /trips/trips/{id}/accept/` | `in_trip` | Also sets `started_at` |
+| Driver starts trip | `POST /trips/trips/{id}/start/` | `in_trip` | Also sets `started_at` |
+| Driver completes trip | `POST /trips/trips/{id}/complete/` | `on_rest` | Sets `rest_ends_at = ended_at + 9h` |
+| Driver rejects trip | `POST /trips/trips/{id}/reject/` | *(unchanged)* | Trip reverts to `pending`, notifies managers |
+| Trip cancelled | `POST /trips/trips/{id}/cancel/` | `available` | |
+| Leave approved | `POST /leave-requests/{id}/approve/` | `on_leave` | Set by fleet manager |
+| Leave rejected | `POST /leave-requests/{id}/reject/` | *(unchanged)* | Notifies driver |
 
 ---
 
@@ -1704,6 +1797,8 @@ Drivers have a `driver_status` on their profile that the fleet manager uses to t
 GET /api/v1/users/?profile__driver_status=available
 GET /api/v1/users/?profile__driver_status=in_trip
 GET /api/v1/users/?profile__driver_status=clocked_out
+GET /api/v1/users/?profile__driver_status=on_rest
+GET /api/v1/users/?profile__driver_status=on_leave
 ```
 > Combine with `?profile__role=driver` to scope to drivers only.
 
@@ -1716,9 +1811,11 @@ GET /api/v1/users/?profile__driver_status=clocked_out
 **Content-Type:** `multipart/form-data` (file upload)
 **Upload directory:** `media/driver_documents/`
 
+> **Profile integration:** After uploading documents, the absolute URLs are exposed in the `GET /auth/me/` and `GET /users/{id}/` responses under `profile.driving_licence` and `profile.aadhaar_card`. These are the latest uploaded files for each type.
+
 ### GET `/api/v1/driver-documents/` — List Driver Documents
 **Auth:** Bearer Token
-**Filters:** `?document_type=aadhar`
+**Filters:** `?document_type=aadhar` `?user=<id>` (fleet manager only)
 
 ### GET `/api/v1/driver-documents/{id}/` — Get Document Detail
 **Auth:** Bearer Token
@@ -1805,6 +1902,145 @@ odometer_reading_km: 15250.00    // optional, decimal (10,2)
 
 ---
 
+## 32. Leave Requests
+
+**Permission:** Any authenticated user.
+- **Drivers** can create leave requests and see only their own.
+- **Fleet Managers** can see all leave requests and approve/reject them.
+**Note:** `driver` is auto-set to the logged-in user on creation.
+
+### GET `/api/v1/leave-requests/` — List Leave Requests
+**Auth:** Bearer Token
+**Filters:** `?status=pending` `?driver=<id>` (fleet manager only)
+
+### GET `/api/v1/leave-requests/{id}/` — Get Leave Request Detail
+**Auth:** Bearer Token
+
+### POST `/api/v1/leave-requests/` — Submit Leave Request (Driver)
+**Auth:** Bearer Token
+```json
+{
+    "start_date": "2026-04-01",        // required, date YYYY-MM-DD
+    "end_date": "2026-04-05",          // required, date YYYY-MM-DD
+    "reason": "Family function"        // optional, text
+}
+```
+**Response (201):**
+```json
+{
+    "id": 1,
+    "driver": 2,
+    "driver_name": "John Doe",
+    "start_date": "2026-04-01",
+    "end_date": "2026-04-05",
+    "reason": "Family function",
+    "status": "pending",
+    "reviewed_by": null,
+    "reviewed_at": null,
+    "rejection_reason": "",
+    "created_at": "2026-03-25T10:00:00Z",
+    "updated_at": "2026-03-25T10:00:00Z"
+}
+```
+
+> **Side effect on create:** Sends a `leave_request` notification to all fleet managers.
+
+### PUT `/api/v1/leave-requests/{id}/` — Full Update (Driver, own pending requests only)
+**Auth:** Bearer Token
+> Same fields as POST. Only `pending` requests can be edited.
+
+### PATCH `/api/v1/leave-requests/{id}/` — Partial Update
+**Auth:** Bearer Token
+```json
+{
+    "reason": "Updated reason"
+}
+```
+
+### DELETE `/api/v1/leave-requests/{id}/` — Delete Leave Request
+**Auth:** Bearer Token (driver can delete own pending requests; fleet manager can delete any)
+
+---
+
+### POST `/api/v1/leave-requests/{id}/approve/` — Approve Leave Request (Fleet Manager)
+**Auth:** Bearer Token (fleet_manager only)
+**Precondition:** Request status must be `pending`
+```json
+{}
+```
+> No body required.
+
+**Response (200):** Full leave request object with `"status": "approved"`.
+
+> **Side effects:**
+> - Sets leave request `status=approved`, `reviewed_by=current_user`, `reviewed_at=now`.
+> - Sets driver's `driver_status=on_leave`.
+> - Sends a `leave_approved` notification to the driver.
+
+---
+
+### POST `/api/v1/leave-requests/{id}/reject/` — Reject Leave Request (Fleet Manager)
+**Auth:** Bearer Token (fleet_manager only)
+**Precondition:** Request status must be `pending`
+```json
+{
+    "rejection_reason": "Insufficient leave balance"   // optional, text
+}
+```
+
+**Response (200):** Full leave request object with `"status": "rejected"`.
+
+> **Side effects:**
+> - Sets leave request `status=rejected`, `reviewed_by=current_user`, `reviewed_at=now`, `rejection_reason=<reason>`.
+> - Driver's `driver_status` is **not** changed.
+> - Sends a `leave_rejected` notification to the driver with the rejection reason.
+
+---
+
+## 33. Spare Parts Used (Legacy)
+
+**Permission:** Maintenance Staff or Fleet Manager only.
+
+> **Table:** `spare_parts_used` — Legacy table. New integrations should use `/maintenance/spare-parts/` (Section 23) which operates on the `spare_parts` table. This endpoint is kept for backwards compatibility.
+
+### GET `/api/v1/maintenance/spare-parts-used/` — List Spare Parts Used
+**Auth:** Bearer Token
+**Filters:** `?maintenance=1`
+
+### GET `/api/v1/maintenance/spare-parts-used/{id}/` — Get Spare Part Used Detail
+**Auth:** Bearer Token
+
+### POST `/api/v1/maintenance/spare-parts-used/` — Add Spare Part Used
+**Auth:** Bearer Token (maintenance_staff or fleet_manager)
+```json
+{
+    "maintenance": 1,                  // required, FK → MaintenanceRecord ID
+    "part_name": "Oil Filter",         // required, max 200
+    "part_number": "OF-001",           // optional, max 100
+    "quantity": 1.00,                  // required, decimal (10,2)
+    "unit_cost": 250.00                // optional, decimal (10,2)
+}
+```
+> `total_cost` is auto-calculated as `quantity × unit_cost`.
+
+### PUT `/api/v1/maintenance/spare-parts-used/{id}/` — Full Update
+**Auth:** Bearer Token (maintenance_staff or fleet_manager)
+> Same fields as POST.
+
+### PATCH `/api/v1/maintenance/spare-parts-used/{id}/` — Partial Update
+**Auth:** Bearer Token (maintenance_staff or fleet_manager)
+```json
+{
+    "quantity": 2.00,
+    "unit_cost": 275.00
+}
+```
+
+### DELETE `/api/v1/maintenance/spare-parts-used/{id}/` — Delete Spare Part Used
+**Auth:** Bearer Token (maintenance_staff or fleet_manager)
+
+---
+
 ## Quick Reference: Pagination
 
 All list endpoints use page-number pagination:
@@ -1846,9 +2082,14 @@ Set this in Postman → **Headers** tab, or use **Authorization** tab → Type: 
 5. **Create Vehicles** (as fleet_manager)
 6. **Create Inspection Checklists + Items** (as maintenance_staff/fleet_manager)
 7. **Create Orders** (as fleet_manager) — with drop points
-8. **Create Trips** (as fleet_manager) — assign vehicle + driver
-9. **Start Trip** (as driver) → **Update Driver Location** → **Log GPS** → **Complete Trip**
-10. **Submit Inspections** (as driver) — pre/post trip
-11. **Report Issues** (as driver) → **Create Maintenance Records** (as maintenance_staff)
-12. **Send Messages** / **Trigger SOS** (as driver)
-13. **Resolve SOS** (as fleet_manager)
+8. **Create Trips** (as fleet_manager) — assign vehicle + driver → trip status is `assigned`
+9. **Accept Trip** (as driver) → trip goes `in_progress` + driver goes `in_trip`
+   - Or **Reject Trip** → trip reverts to `pending`, fleet manager gets notification
+10. **Update Driver Location** → **Log GPS** → **Complete Trip** (as driver) → driver goes `on_rest` for 9 hours
+11. **Submit Inspections** (as driver) — pre/post trip
+12. **Report Issues** (as driver) → **Create Maintenance Records** (as maintenance_staff)
+13. **Send Messages** / **Trigger SOS** (as driver)
+14. **Resolve SOS** (as fleet_manager)
+15. **Submit Leave Request** (as driver) → fleet manager gets notification
+16. **Approve/Reject Leave** (as fleet_manager) → driver status → `on_leave` or unchanged
+17. **Upload Driver Documents** (as driver) → `POST /driver-documents/` → check `GET /auth/me/` for `profile.driving_licence` / `profile.aadhaar_card` URLs

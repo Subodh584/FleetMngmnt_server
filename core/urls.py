@@ -10,6 +10,7 @@ router.register(r'locations', views.LocationViewSet, basename='location')
 router.register(r'geofences', views.GeofenceViewSet, basename='geofence')
 router.register(r'driver-documents', views.DriverDocumentViewSet, basename='driver-document')
 router.register(r'profile-images', views.ProfileImageViewSet, basename='profile-image')
+router.register(r'leave-requests', views.LeaveRequestViewSet, basename='leave-request')
 
 urlpatterns = [
     # JWT auth

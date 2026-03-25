@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from .models import DriverDocument, Geofence, Location, ProfileImage, UserProfile
+from .models import DriverDocument, Geofence, LeaveRequest, Location, ProfileImage, UserProfile
 
 User = get_user_model()
 
@@ -36,9 +36,10 @@ class UserProfileSerializer(serializers.ModelSerializer):
         model = UserProfile
         fields = [
             'role', 'phone', 'profile_photo', 'is_active', 'first_time_login',
-            'driver_status', 'driving_licence', 'aadhaar_card', 'created_at', 'updated_at',
+            'driver_status', 'rest_ends_at', 'driving_licence', 'aadhaar_card',
+            'created_at', 'updated_at',
         ]
-        read_only_fields = ['created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at', 'rest_ends_at']
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -160,3 +161,23 @@ class GeofenceSerializer(serializers.ModelSerializer):
         model = Geofence
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at', 'created_by']
+
+
+# ---------------------------------------------------------------------------
+# Leave request serializers
+# ---------------------------------------------------------------------------
+
+class LeaveRequestSerializer(serializers.ModelSerializer):
+    driver_name = serializers.SerializerMethodField()
+
+    def get_driver_name(self, obj):
+        return obj.driver.get_full_name() or obj.driver.username
+
+    class Meta:
+        model = LeaveRequest
+        fields = [
+            'id', 'driver', 'driver_name', 'start_date', 'end_date', 'reason',
+            'status', 'reviewed_by', 'reviewed_at', 'rejection_reason',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['driver', 'status', 'reviewed_by', 'reviewed_at', 'rejection_reason', 'created_at', 'updated_at']

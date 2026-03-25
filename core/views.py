@@ -10,12 +10,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import DriverDocument, Geofence, Location, ProfileImage, UserProfile
-from .permissions import IsFleetManagerOrReadOnly
+from django.utils import timezone
+
+from .models import DriverDocument, Geofence, LeaveRequest, Location, ProfileImage, UserProfile
+from .permissions import IsFleetManager, IsFleetManagerOrReadOnly
 from .serializers import (
     ChangePasswordSerializer,
     DriverDocumentSerializer,
     GeofenceSerializer,
+    LeaveRequestSerializer,
     LocationSerializer,
     ProfileImageSerializer,
     UserProfileUpdateSerializer,
@@ -64,7 +67,10 @@ class MeView(generics.RetrieveUpdateAPIView):
         return UserSerializer
 
     def get_object(self):
-        return self.request.user
+        user = self.request.user
+        if hasattr(user, 'profile'):
+            user.profile.resolve_rest_status()
+        return user
 
     def update(self, request, *args, **kwargs):
         serializer = UserProfileUpdateSerializer(data=request.data, partial=True)
@@ -175,8 +181,14 @@ class ClockInView(APIView):
                 {'detail': 'Cannot clock in while on an active trip. Complete the trip first.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if profile.driver_status == 'on_leave':
+            return Response(
+                {'detail': 'Cannot clock in while on approved leave.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         profile.driver_status = 'available'
-        profile.save(update_fields=['driver_status', 'updated_at'])
+        profile.rest_ends_at = None
+        profile.save(update_fields=['driver_status', 'rest_ends_at', 'updated_at'])
         return Response({'driver_status': profile.driver_status, 'detail': 'Clocked in successfully. You are now available.'})
 
 
@@ -281,4 +293,88 @@ class GeofenceViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+
+# ---------------------------------------------------------------------------
+# Leave request views
+# ---------------------------------------------------------------------------
+
+class LeaveRequestViewSet(viewsets.ModelViewSet):
+    serializer_class = LeaveRequestSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['status', 'driver']
+
+    def get_queryset(self):
+        user = self.request.user
+        if hasattr(user, 'profile') and user.profile.role == 'fleet_manager':
+            return LeaveRequest.objects.select_related('driver', 'reviewed_by').all()
+        return LeaveRequest.objects.select_related('driver', 'reviewed_by').filter(driver=user)
+
+    def perform_create(self, serializer):
+        serializer.save(driver=self.request.user)
+        # Notify all fleet managers of the new leave request
+        from comms.models import Notification
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        leave = serializer.instance
+        driver_name = self.request.user.get_full_name() or self.request.user.username
+        managers = User.objects.filter(profile__role='fleet_manager')
+        Notification.objects.bulk_create([
+            Notification(
+                user=mgr,
+                alert_type='leave_request',
+                title='New Leave Request',
+                body=f'{driver_name} has requested leave from {leave.start_date} to {leave.end_date}.',
+                reference_id=leave.pk,
+                reference_type='leave_request',
+            )
+            for mgr in managers
+        ])
+
+    @action(detail=True, methods=['post'], permission_classes=[IsFleetManager])
+    def approve(self, request, pk=None):
+        leave = self.get_object()
+        if leave.status != 'pending':
+            return Response({'detail': 'Only pending requests can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
+        leave.status = 'approved'
+        leave.reviewed_by = request.user
+        leave.reviewed_at = timezone.now()
+        leave.save()
+        # Set driver status to on_leave
+        profile = leave.driver.profile
+        profile.driver_status = 'on_leave'
+        profile.save(update_fields=['driver_status', 'updated_at'])
+        # Notify driver
+        from comms.models import Notification
+        Notification.objects.create(
+            user=leave.driver,
+            alert_type='leave_approved',
+            title='Leave Approved',
+            body=f'Your leave from {leave.start_date} to {leave.end_date} has been approved.',
+            reference_id=leave.pk,
+            reference_type='leave_request',
+        )
+        return Response(LeaveRequestSerializer(leave).data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsFleetManager])
+    def reject(self, request, pk=None):
+        leave = self.get_object()
+        if leave.status != 'pending':
+            return Response({'detail': 'Only pending requests can be rejected.'}, status=status.HTTP_400_BAD_REQUEST)
+        leave.status = 'rejected'
+        leave.reviewed_by = request.user
+        leave.reviewed_at = timezone.now()
+        leave.rejection_reason = request.data.get('reason', '')
+        leave.save()
+        # Notify driver
+        from comms.models import Notification
+        Notification.objects.create(
+            user=leave.driver,
+            alert_type='leave_rejected',
+            title='Leave Rejected',
+            body=f'Your leave request from {leave.start_date} to {leave.end_date} was not approved.',
+            reference_id=leave.pk,
+            reference_type='leave_request',
+        )
+        return Response(LeaveRequestSerializer(leave).data)
 

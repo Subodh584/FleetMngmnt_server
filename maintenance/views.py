@@ -4,11 +4,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from core.permissions import IsMaintenanceStaffOrFleetManager
-from .models import MaintenanceSchedule, MaintenanceRecord, SparePartUsed
+from .models import MaintenanceSchedule, MaintenanceRecord, SparePart, SparePartUsed
 from .serializers import (
     MaintenanceScheduleSerializer,
     MaintenanceRecordSerializer,
     MaintenanceRecordCreateSerializer,
+    SparePartSerializer,
     SparePartUsedSerializer,
 )
 
@@ -81,8 +82,19 @@ class MaintenanceRecordViewSet(viewsets.ModelViewSet):
         return Response(MaintenanceRecordSerializer(record).data)
 
 
+class SparePartViewSet(viewsets.ModelViewSet):
+    serializer_class = SparePartSerializer
+    permission_classes = [IsMaintenanceStaffOrFleetManager]
+    filterset_fields = ['maintenance']
+
+    def get_queryset(self):
+        return SparePart.objects.select_related('maintenance').all()
+
+
 class SparePartUsedViewSet(viewsets.ModelViewSet):
-    queryset = SparePartUsed.objects.select_related('maintenance').all()
     serializer_class = SparePartUsedSerializer
     permission_classes = [IsMaintenanceStaffOrFleetManager]
     filterset_fields = ['maintenance']
+
+    def get_queryset(self):
+        return SparePartUsed.objects.select_related('maintenance').all()

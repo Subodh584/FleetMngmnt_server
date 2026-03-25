@@ -20,6 +20,8 @@ class UserProfile(models.Model):
         ('available', 'Available'),
         ('in_trip', 'In Trip'),
         ('clocked_out', 'Clocked Out'),
+        ('on_rest', 'On Rest'),
+        ('on_leave', 'On Leave'),
     ]
 
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
@@ -32,8 +34,17 @@ class UserProfile(models.Model):
         choices=DRIVER_STATUS_CHOICES,
         default='clocked_out',
     )
+    rest_ends_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def resolve_rest_status(self):
+        """If the rest window has elapsed, automatically flip status to available."""
+        from django.utils import timezone
+        if self.driver_status == 'on_rest' and self.rest_ends_at and timezone.now() >= self.rest_ends_at:
+            self.driver_status = 'available'
+            self.rest_ends_at = None
+            self.save(update_fields=['driver_status', 'rest_ends_at', 'updated_at'])
 
     class Meta:
         db_table = 'user_profiles'
@@ -93,6 +104,37 @@ class Location(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class LeaveRequest(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    driver = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='leave_requests',
+    )
+    start_date = models.DateField()
+    end_date = models.DateField()
+    reason = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='reviewed_leave_requests',
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'leave_requests'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Leave #{self.pk} – {self.driver} ({self.start_date} → {self.end_date})'
 
 
 class Geofence(models.Model):

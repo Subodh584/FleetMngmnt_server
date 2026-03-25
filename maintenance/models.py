@@ -83,6 +83,36 @@ class MaintenanceRecord(models.Model):
         return f'Record #{self.pk} – {self.vehicle}'
 
 
+class SparePart(models.Model):
+    """Spare parts linked to a maintenance record."""
+    maintenance = models.ForeignKey(
+        MaintenanceRecord, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='parts',
+    )
+    part_name = models.TextField()
+    part_number = models.TextField(blank=True, null=True)
+    quantity = models.TextField(blank=True, null=True)
+    unit_cost = models.TextField(blank=True, null=True)
+    total_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'spare_parts'
+        verbose_name = 'Spare Part'
+
+    def save(self, *args, **kwargs):
+        try:
+            if self.quantity and self.unit_cost:
+                self.total_cost = float(self.quantity) * float(self.unit_cost)
+        except (ValueError, TypeError):
+            pass
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.part_name} x{self.quantity}'
+
+
 class SparePartUsed(models.Model):
     maintenance = models.ForeignKey(
         MaintenanceRecord, on_delete=models.CASCADE, related_name='spare_parts',
