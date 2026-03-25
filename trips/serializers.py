@@ -209,7 +209,7 @@ class FuelLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = FuelLog
         fields = '__all__'
-        read_only_fields = ['driver', 'logged_at']
+        read_only_fields = ['driver', 'vehicle', 'logged_at']
 
 
 # ---------------------------------------------------------------------------
@@ -250,4 +250,4 @@ class OdometerImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = OdometerImage
         fields = '__all__'
-        read_only_fields = ['driver', 'recorded_at']
+        read_only_fields = ['driver', 'vehicle', 'recorded_at']

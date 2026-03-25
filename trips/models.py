@@ -216,6 +216,7 @@ class TripExpense(models.Model):
     currency = models.CharField(max_length=3, default='INR')
     description = models.TextField(blank=True, default='')
     receipt_url = models.URLField(blank=True, default='')
+    receipt_image = models.ImageField(upload_to='expense_receipts/', blank=True, null=True)
     recorded_at = models.DateTimeField(auto_now_add=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -240,6 +241,7 @@ class FuelLog(models.Model):
     odometer_km = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     fuel_station = models.CharField(max_length=200, blank=True, default='')
     receipt_url = models.URLField(blank=True, default='')
+    receipt_image = models.ImageField(upload_to='fuel_receipts/', blank=True, null=True)
     logged_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

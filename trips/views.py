@@ -221,6 +221,14 @@ class TripViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(logs)
         return self.get_paginated_response(FuelLogSerializer(page, many=True).data)
 
+    @action(detail=True, methods=['get'])
+    def odometer_images(self, request, pk=None):
+        """Get all odometer images for a trip."""
+        trip = self.get_object()
+        images = trip.odometer_images.all().order_by('recorded_at')
+        page = self.paginate_queryset(images)
+        return self.get_paginated_response(OdometerImageSerializer(page, many=True).data)
+
 
 # ---------------------------------------------------------------------------
 # Driver locations
@@ -386,7 +394,9 @@ class FuelLogViewSet(viewsets.ModelViewSet):
     filterset_fields = ['trip', 'vehicle', 'driver']
 
     def perform_create(self, serializer):
-        serializer.save(driver=self.request.user)
+        trip = serializer.validated_data.get('trip')
+        vehicle = trip.vehicle if trip else None
+        serializer.save(driver=self.request.user, vehicle=vehicle)
 
 
 # ---------------------------------------------------------------------------
@@ -400,7 +410,9 @@ class OdometerImageViewSet(viewsets.ModelViewSet):
     filterset_fields = ['trip', 'vehicle', 'driver']
 
     def perform_create(self, serializer):
-        serializer.save(driver=self.request.user)
+        trip = serializer.validated_data.get('trip')
+        vehicle = trip.vehicle if trip else None
+        serializer.save(driver=self.request.user, vehicle=vehicle)
 
 
 # ---------------------------------------------------------------------------

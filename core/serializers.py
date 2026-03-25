@@ -11,9 +11,33 @@ User = get_user_model()
 # ---------------------------------------------------------------------------
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    driving_licence = serializers.SerializerMethodField()
+    aadhaar_card = serializers.SerializerMethodField()
+
+    def get_driving_licence(self, obj):
+        doc = obj.user.documents.filter(document_type='driving_license').order_by('-uploaded_at').first()
+        if doc and doc.file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(doc.file.url)
+            return doc.file.url
+        return None
+
+    def get_aadhaar_card(self, obj):
+        doc = obj.user.documents.filter(document_type='aadhar').order_by('-uploaded_at').first()
+        if doc and doc.file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(doc.file.url)
+            return doc.file.url
+        return None
+
     class Meta:
         model = UserProfile
-        fields = ['role', 'phone', 'profile_photo', 'is_active', 'first_time_login', 'driver_status', 'created_at', 'updated_at']
+        fields = [
+            'role', 'phone', 'profile_photo', 'is_active', 'first_time_login',
+            'driver_status', 'driving_licence', 'aadhaar_card', 'created_at', 'updated_at',
+        ]
         read_only_fields = ['created_at', 'updated_at']
 
 

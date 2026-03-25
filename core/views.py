@@ -43,7 +43,7 @@ class RegisterView(generics.CreateAPIView):
         refresh = RefreshToken.for_user(user)
         return Response(
             {
-                'user': UserSerializer(user).data,
+                'user': UserSerializer(user, context={'request': request}).data,
                 'tokens': {
                     'refresh': str(refresh),
                     'access': str(refresh.access_token),
@@ -70,7 +70,7 @@ class MeView(generics.RetrieveUpdateAPIView):
         serializer = UserProfileUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.update(request.user, serializer.validated_data)
-        return Response(UserSerializer(request.user).data)
+        return Response(UserSerializer(request.user, context={'request': request}).data)
 
 
 class ChangePasswordView(generics.GenericAPIView):
@@ -226,7 +226,7 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
 class DriverDocumentViewSet(viewsets.ModelViewSet):
     serializer_class = DriverDocumentSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filterset_fields = ['document_type']
+    filterset_fields = ['document_type', 'user']
 
     def get_queryset(self):
         user = self.request.user
