@@ -63,6 +63,8 @@ class MaintenanceRecordViewSet(viewsets.ModelViewSet):
         record.completed_at = timezone.now()
         record.total_cost = request.data.get('total_cost', record.total_cost)
         record.technician_notes = request.data.get('technician_notes', record.technician_notes)
+        if 'parts_used' in request.data:
+            record.parts_used = request.data['parts_used']
         record.save()
         # Set vehicle back to available
         vehicle = record.vehicle

@@ -1338,10 +1338,37 @@ This is the primary endpoint called from the **driver's phone**. It creates a ne
 **Filters:** `?vehicle=1` `?maintenance_type=preventive` `?repair_status=pending` `?assigned_to=2`
 **Ordering:** `?ordering=-created_at`
 
-### GET `/api/v1/maintenance/records/{id}/` — Get Record Detail (includes spare_parts)
+### GET `/api/v1/maintenance/records/{id}/` — Get Record Detail (includes spare_parts & parts_used)
 **Auth:** Bearer Token
 
-### POST `/api/v1/maintenance/records/` — Create Maintenance Record (with optional spare parts)
+**Response includes:**
+```json
+{
+    "id": 1,
+    "vehicle": 1,
+    "schedule": null,
+    "issue": null,
+    "maintenance_type": "corrective",
+    "description": "Brake pad replacement",
+    "repair_status": "pending",
+    "assigned_to": 3,
+    "assigned_by": 2,
+    "started_at": null,
+    "completed_at": null,
+    "total_cost": null,
+    "mileage_at_service": "15500.00",
+    "technician_notes": "",
+    "parts_used": [
+        {"name": "Brake Pad Set", "part_number": "BP-TT-001", "quantity": 2, "unit_cost": 1500.00},
+        {"name": "Brake Fluid",   "part_number": "BF-DOT4",   "quantity": 1, "unit_cost": 350.00}
+    ],
+    "spare_parts": [...],
+    "created_at": "2026-03-26T09:00:00Z",
+    "updated_at": "2026-03-26T09:00:00Z"
+}
+```
+
+### POST `/api/v1/maintenance/records/` — Create Maintenance Record
 **Auth:** Bearer Token (maintenance_staff or fleet_manager)
 ```json
 {
@@ -1353,22 +1380,22 @@ This is the primary endpoint called from the **driver's phone**. It creates a ne
     "assigned_to": 3,                          // optional, FK → User ID (maintenance_staff)
     "mileage_at_service": 15500.00,            // optional, decimal (10,2)
     "technician_notes": "Front and rear pads replaced", // optional
-    "spare_parts": [                           // optional, array
+    "parts_used": [                            // optional, JSON array — free-form part objects
+        {"name": "Brake Pad Set", "part_number": "BP-TT-001", "quantity": 2, "unit_cost": 1500.00},
+        {"name": "Brake Fluid",   "part_number": "BF-DOT4",   "quantity": 1, "unit_cost": 350.00}
+    ],
+    "spare_parts": [                           // optional, creates SparePartUsed rows (structured)
         {
             "part_name": "Brake Pad Set",      // required, max 200
             "part_number": "BP-TT-001",        // optional, max 100
             "quantity": 2.00,                   // required, decimal (10,2)
             "unit_cost": 1500.00               // optional, decimal (10,2)
-        },
-        {
-            "part_name": "Brake Fluid",
-            "part_number": "BF-DOT4",
-            "quantity": 1.00,
-            "unit_cost": 350.00
         }
     ]
 }
 ```
+> `parts_used` is a **JSON array stored directly on the record** — use it to store a snapshot of parts in any shape your frontend finds convenient.  
+> `spare_parts` creates linked `SparePartUsed` rows (structured, relational).  
 > `total_cost` for each spare part is auto-calculated as `quantity × unit_cost`.
 
 ### PUT `/api/v1/maintenance/records/{id}/` — Full Update
@@ -1384,7 +1411,10 @@ This is the primary endpoint called from the **driver's phone**. It creates a ne
     "assigned_to": 3,
     "mileage_at_service": 15500.00,
     "technician_notes": "Updated notes",
-    "total_cost": 3350.00
+    "total_cost": 3350.00,
+    "parts_used": [
+        {"name": "Brake Pad Set", "part_number": "BP-TT-001", "quantity": 2, "unit_cost": 1500.00}
+    ]
 }
 ```
 
@@ -1393,7 +1423,10 @@ This is the primary endpoint called from the **driver's phone**. It creates a ne
 ```json
 {
     "technician_notes": "Completed - parts performing well",
-    "total_cost": 3500.00
+    "total_cost": 3500.00,
+    "parts_used": [
+        {"name": "Brake Fluid", "part_number": "BF-DOT4", "quantity": 1, "unit_cost": 350.00}
+    ]
 }
 ```
 
@@ -1411,13 +1444,18 @@ This is the primary endpoint called from the **driver's phone**. It creates a ne
 ```json
 {
     "total_cost": 3500.00,                     // optional (overrides existing)
-    "technician_notes": "All work completed"   // optional (overrides existing)
+    "technician_notes": "All work completed",  // optional (overrides existing)
+    "parts_used": [                            // optional (overrides existing)
+        {"name": "Brake Pad Set", "part_number": "BP-TT-001", "quantity": 2, "unit_cost": 1500.00},
+        {"name": "Brake Fluid",   "part_number": "BF-DOT4",   "quantity": 1, "unit_cost": 350.00}
+    ]
 }
 ```
 > Sets `repair_status=completed`, `completed_at=now`, vehicle `status=available`, updates `last_service_date`. If linked schedule → marks completed. If linked issue → marks resolved.
 
 ### DELETE `/api/v1/maintenance/records/{id}/` — Delete Record
 **Auth:** Bearer Token (maintenance_staff or fleet_manager)
+
 
 ---
 

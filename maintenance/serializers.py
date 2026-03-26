@@ -34,6 +34,7 @@ class MaintenanceRecordSerializer(serializers.ModelSerializer):
         model = MaintenanceRecord
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at']
+        # parts_used is a writable JSONField — no extra config needed
 
 
 class MaintenanceRecordCreateSerializer(serializers.ModelSerializer):
@@ -43,7 +44,7 @@ class MaintenanceRecordCreateSerializer(serializers.ModelSerializer):
         model = MaintenanceRecord
         fields = [
             'vehicle', 'schedule', 'issue', 'maintenance_type', 'description',
-            'assigned_to', 'mileage_at_service', 'technician_notes', 'spare_parts',
+            'assigned_to', 'mileage_at_service', 'technician_notes', 'parts_used', 'spare_parts',
         ]
 
     def create(self, validated_data):
@@ -57,6 +58,7 @@ class MaintenanceRecordCreateSerializer(serializers.ModelSerializer):
         vehicle.status = 'under_maintenance'
         vehicle.save(update_fields=['status', 'updated_at'])
         return record
+
 
     def to_representation(self, instance):
         return MaintenanceRecordSerializer(instance).data
