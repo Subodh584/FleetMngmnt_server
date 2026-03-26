@@ -61,7 +61,12 @@ class MaintenanceRecordViewSet(viewsets.ModelViewSet):
             )
         record.repair_status = 'completed'
         record.completed_at = timezone.now()
-        record.total_cost = request.data.get('total_cost', record.total_cost)
+        total_cost = request.data.get('total_cost')
+        if total_cost is not None:
+            try:
+                record.total_cost = float(total_cost)
+            except (ValueError, TypeError):
+                pass
         record.technician_notes = request.data.get('technician_notes', record.technician_notes)
         record.save()
         # Set vehicle back to available

@@ -105,9 +105,11 @@ class SparePart(models.Model):
     def save(self, *args, **kwargs):
         try:
             if self.quantity and self.unit_cost:
-                self.total_cost = float(self.quantity) * float(self.unit_cost)
+                qty = float(str(self.quantity).strip() or 0)
+                cost = float(str(self.unit_cost).strip() or 0)
+                self.total_cost = qty * cost
         except (ValueError, TypeError):
-            pass
+            self.total_cost = 0
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -129,8 +131,13 @@ class SparePartUsed(models.Model):
         db_table = 'spare_parts_used'
 
     def save(self, *args, **kwargs):
-        if self.quantity and self.unit_cost:
-            self.total_cost = self.quantity * self.unit_cost
+        try:
+            if self.quantity and self.unit_cost:
+                qty = float(self.quantity)
+                cost = float(self.unit_cost)
+                self.total_cost = qty * cost
+        except (ValueError, TypeError):
+            self.total_cost = 0
         super().save(*args, **kwargs)
 
     def __str__(self):

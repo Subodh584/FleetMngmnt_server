@@ -46,6 +46,12 @@ class MaintenanceRecordCreateSerializer(serializers.ModelSerializer):
             'assigned_to', 'mileage_at_service', 'technician_notes', 'parts_used', 'spare_parts',
         ]
 
+    def validate_total_cost(self, value):
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            raise serializers.ValidationError("Total cost must be a numeric value.")
+
     def create(self, validated_data):
         print("\n[DEBUG] RECEIVED PAYLOAD:", self.context['request'].data)
         print("[DEBUG] VALIDATED DATA:", validated_data)
