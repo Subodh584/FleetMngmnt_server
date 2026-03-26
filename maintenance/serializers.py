@@ -43,7 +43,8 @@ class MaintenanceRecordCreateSerializer(serializers.ModelSerializer):
         model = MaintenanceRecord
         fields = [
             'vehicle', 'schedule', 'issue', 'maintenance_type', 'description',
-            'assigned_to', 'mileage_at_service', 'technician_notes', 'parts_used', 'spare_parts',
+            'repair_status', 'assigned_to', 'started_at', 'completed_at',
+            'total_cost', 'mileage_at_service', 'technician_notes', 'parts_used', 'spare_parts',
         ]
 
     def validate_total_cost(self, value):
