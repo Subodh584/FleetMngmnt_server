@@ -15,7 +15,7 @@ class Migration(migrations.Migration):
                 migrations.AddField(
                     model_name='maintenancerecord',
                     name='parts_used',
-                    field=models.TextField(blank=True, default=''),
+                    field=models.JSONField(blank=True, default=list),
                 ),
             ],
             database_operations=[],  # Column already exists in the database
