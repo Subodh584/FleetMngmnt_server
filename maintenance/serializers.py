@@ -47,9 +47,13 @@ class MaintenanceRecordCreateSerializer(serializers.ModelSerializer):
         ]
 
     def create(self, validated_data):
+        print("\n[DEBUG] RECEIVED PAYLOAD:", self.context['request'].data)
+        print("[DEBUG] VALIDATED DATA:", validated_data)
         spare_parts_data = validated_data.pop('spare_parts', [])
         user = self.context['request'].user
         record = MaintenanceRecord.objects.create(assigned_by=user, **validated_data)
+        print("[DEBUG] SAVED RECORD ID:", record.id)
+        print("[DEBUG] SAVED PARTS_USED:", record.parts_used)
         for sp_data in spare_parts_data:
             SparePartUsed.objects.create(maintenance=record, **sp_data)
         # Set vehicle under_maintenance
