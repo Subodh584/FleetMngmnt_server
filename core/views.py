@@ -366,6 +366,11 @@ class LeaveRequestViewSet(viewsets.ModelViewSet):
         leave.reviewed_at = timezone.now()
         leave.rejection_reason = request.data.get('reason', '')
         leave.save()
+        # Reset driver status to available (unless they are actively on a trip)
+        profile = leave.driver.profile
+        if profile.driver_status not in ('in_trip', 'clocked_out'):
+            profile.driver_status = 'available'
+            profile.save(update_fields=['driver_status', 'updated_at'])
         # Notify driver
         from comms.models import Notification
         Notification.objects.create(
