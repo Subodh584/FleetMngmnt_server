@@ -10,13 +10,14 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunSQL(
-            sql="ALTER TABLE maintenance_records ALTER COLUMN parts_used DROP NOT NULL;",
-            reverse_sql="ALTER TABLE maintenance_records ALTER COLUMN parts_used SET NOT NULL;",
-        ),
-        migrations.AddField(
-            model_name='maintenancerecord',
-            name='parts_used',
-            field=models.TextField(blank=True, null=True),
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.AddField(
+                    model_name='maintenancerecord',
+                    name='parts_used',
+                    field=models.TextField(blank=True, default=''),
+                ),
+            ],
+            database_operations=[],  # Column already exists in the database
         ),
     ]

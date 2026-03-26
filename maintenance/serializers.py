@@ -43,7 +43,7 @@ class MaintenanceRecordCreateSerializer(serializers.ModelSerializer):
         model = MaintenanceRecord
         fields = [
             'vehicle', 'schedule', 'issue', 'maintenance_type', 'description',
-            'assigned_to', 'mileage_at_service', 'technician_notes', 'spare_parts',
+            'assigned_to', 'mileage_at_service', 'technician_notes', 'parts_used', 'spare_parts',
         ]
 
     def create(self, validated_data):
