@@ -1720,7 +1720,7 @@ Drivers have a `driver_status` on their profile that the fleet manager uses to t
 | `available` | Driver is on duty and ready for a trip. |
 | `in_trip` | Driver is actively executing a trip. |
 | `on_rest` | Driver completed a trip and is in a mandatory 9-hour rest period. Auto-reverts to `available` when rest ends. |
-| `on_leave` | Driver is on approved leave. Set by fleet manager approving a leave request. |
+| `on_leave` | Driver is on approved pe. Set by fleet manager approving a leave request. |
 
 > `driver_status` is visible on every user/profile response via `profile.driver_status`.
 > `rest_ends_at` is set to `trip.ended_at + 9 hours` when status becomes `on_rest`. It is cleared when status reverts to `available`.

@@ -118,9 +118,9 @@ class TripViewSet(viewsets.ModelViewSet):
     def start(self, request, pk=None):
         """Driver starts a trip."""
         trip = self.get_object()
-        if trip.status != 'assigned':
+        if trip.status not in ('assigned', 'accepted'):
             return Response(
-                {'detail': 'Trip can only be started from assigned status.'},
+                {'detail': 'Trip can only be started from assigned or accepted status.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         trip.status = 'in_progress'
@@ -206,19 +206,8 @@ class TripViewSet(viewsets.ModelViewSet):
             )
         if trip.driver_id != request.user.id:
             return Response({'detail': 'You are not the driver for this trip.'}, status=status.HTTP_403_FORBIDDEN)
-        trip.status = 'in_progress'
-        trip.started_at = timezone.now()
-        trip.start_location_lat = request.data.get('latitude')
-        trip.start_location_lng = request.data.get('longitude')
-        trip.start_mileage_km = request.data.get('start_mileage_km', trip.start_mileage_km)
-        trip.save()
-        trip.vehicle.status = 'in_trip'
-        trip.vehicle.save(update_fields=['status', 'updated_at'])
-        trip.order.status = 'in_transit'
-        trip.order.save(update_fields=['status', 'updated_at'])
-        profile = request.user.profile
-        profile.driver_status = 'in_trip'
-        profile.save(update_fields=['driver_status', 'updated_at'])
+        trip.status = 'accepted'
+        trip.save(update_fields=['status', 'updated_at'])
         return Response(TripSerializer(trip).data)
 
     @action(detail=True, methods=['post'])
@@ -233,12 +222,15 @@ class TripViewSet(viewsets.ModelViewSet):
         if trip.driver_id != request.user.id:
             return Response({'detail': 'You are not the driver for this trip.'}, status=status.HTTP_403_FORBIDDEN)
         reason = request.data.get('reason', '')
-        trip.status = 'pending'
+        trip.status = 'rejected'
         trip.rejection_reason = reason
-        trip.save()
+        trip.save(update_fields=['status', 'rejection_reason', 'updated_at'])
         # Free the vehicle
         trip.vehicle.status = 'available'
         trip.vehicle.save(update_fields=['status', 'updated_at'])
+        # Reset order back to pending so fleet manager can reassign
+        trip.order.status = 'pending'
+        trip.order.save(update_fields=['status', 'updated_at'])
         # Notify all fleet managers
         from comms.models import Notification
         from django.contrib.auth import get_user_model

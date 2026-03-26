@@ -36,8 +36,17 @@ class MaintenanceRecordSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
 
+class SparePartInlineSerializer(serializers.ModelSerializer):
+    """Write-only nested serializer used when creating spare parts inline
+    inside a MaintenanceRecord. Excludes 'maintenance' and 'id' because
+    those are set programmatically during record creation."""
+    class Meta:
+        model = SparePartUsed
+        fields = ['part_name', 'part_number', 'quantity', 'unit_cost']
+
+
 class MaintenanceRecordCreateSerializer(serializers.ModelSerializer):
-    spare_parts = SparePartUsedSerializer(many=True, required=False)
+    spare_parts = SparePartInlineSerializer(many=True, required=False)
 
     class Meta:
         model = MaintenanceRecord
