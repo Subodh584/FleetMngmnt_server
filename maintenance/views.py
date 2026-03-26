@@ -21,6 +21,17 @@ class MaintenanceScheduleViewSet(viewsets.ModelViewSet):
     filterset_fields = ['vehicle', 'maintenance_type', 'status', 'scheduled_date']
     ordering_fields = ['scheduled_date', 'created_at']
 
+    def create(self, request, *args, **kwargs):
+        print(f"DEBUG: MaintenanceSchedule create request.data: {request.data}")
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            print(f"DEBUG: MaintenanceSchedule validation errors: {serializer.errors}")
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
     def perform_create(self, serializer):
         serializer.save(scheduled_by=self.request.user)
 
