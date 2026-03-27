@@ -13,3 +13,10 @@ dj-database-url>=2.1
 python-dotenv>=1.0
 whitenoise[brotli]>=6.5
 gunicorn>=21.2
+
+# AI Assistant (LangChain + Mistral)
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-mistralai>=0.2.0
+langchain-core>=0.3.0
+sqlalchemy>=2.0.0

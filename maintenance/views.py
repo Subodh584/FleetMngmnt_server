@@ -1,3 +1,5 @@
+import calendar
+
 from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -22,7 +24,10 @@ class MaintenanceScheduleViewSet(viewsets.ModelViewSet):
     ordering_fields = ['scheduled_date', 'created_at']
 
     def perform_create(self, serializer):
-        serializer.save(scheduled_by=self.request.user)
+        schedule = serializer.save(scheduled_by=self.request.user)
+        vehicle = schedule.vehicle
+        vehicle.status = 'under_maintenance'
+        vehicle.save(update_fields=['status', 'updated_at'])
 
 
 class MaintenanceRecordViewSet(viewsets.ModelViewSet):
@@ -64,13 +69,19 @@ class MaintenanceRecordViewSet(viewsets.ModelViewSet):
         record.total_cost = request.data.get('total_cost', record.total_cost)
         record.technician_notes = request.data.get('technician_notes', record.technician_notes)
         record.save()
-        # Set vehicle back to available
+        # Set vehicle back to available and reset service tracking
         vehicle = record.vehicle
         vehicle.status = 'available'
         vehicle.last_service_date = timezone.now().date()
+        today = timezone.now().date()
+        month = today.month + 4
+        year = today.year + (month - 1) // 12
+        month = (month - 1) % 12 + 1
+        day = min(today.day, calendar.monthrange(year, month)[1])
+        vehicle.next_service_due_date = today.replace(year=year, month=month, day=day)
         if record.mileage_at_service:
             vehicle.current_mileage_km = record.mileage_at_service
-        vehicle.save(update_fields=['status', 'last_service_date', 'current_mileage_km', 'updated_at'])
+        vehicle.save(update_fields=['status', 'last_service_date', 'next_service_due_date', 'current_mileage_km', 'updated_at'])
         # Also update schedule if linked
         if record.schedule:
             record.schedule.status = 'completed'

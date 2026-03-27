@@ -1,6 +1,8 @@
 from rest_framework import serializers
 
 from core.models import Location
+from core.serializers import UserSerializer
+from fleet.serializers import VehicleSerializer
 from .models import (
     Order, OrderDropPoint, Trip, Route, RouteDeviation,
     GpsLog, GeofenceEvent, TripExpense, FuelLog, DeliveryProof,
@@ -119,6 +121,8 @@ class RouteSerializer(serializers.ModelSerializer):
 
 class TripSerializer(serializers.ModelSerializer):
     route_detail = RouteSerializer(read_only=True)
+    vehicle_detail = VehicleSerializer(source='vehicle', read_only=True)
+    driver_detail = UserSerializer(source='driver', read_only=True)
     source = serializers.SerializerMethodField()
     destinations = serializers.SerializerMethodField()
 

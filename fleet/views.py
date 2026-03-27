@@ -96,9 +96,9 @@ class InspectionViewSet(viewsets.ModelViewSet):
         """Maintenance staff / fleet manager reviews an inspection."""
         inspection = self.get_object()
         new_status = request.data.get('overall_status')
-        if new_status not in ('approved', 'flagged'):
+        if new_status not in ('approved', 'flagged', 'maintenance_scheduled'):
             return Response(
-                {'detail': 'status must be approved or flagged.'},
+                {'detail': 'status must be approved, flagged, or maintenance_scheduled.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         inspection.overall_status = new_status

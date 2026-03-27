@@ -71,6 +71,7 @@ class Inspection(models.Model):
         ('pending', 'Pending'),
         ('approved', 'Approved'),
         ('flagged', 'Flagged'),
+        ('maintenance_scheduled', 'Maintenance Scheduled'),
     ]
 
     trip = models.ForeignKey(
@@ -89,7 +90,7 @@ class Inspection(models.Model):
         max_length=20, choices=INSPECTION_TYPE_CHOICES, default='pre_trip',
     )
     overall_status = models.CharField(
-        max_length=20, choices=STATUS_CHOICES, default='pending',
+        max_length=30, choices=STATUS_CHOICES, default='pending',
     )
     notes = models.TextField(blank=True, default='')
     approved = models.BooleanField(default=False)

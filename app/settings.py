@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'trips',
     'maintenance',
     'comms',
+    'ai_assistant',
 ]
 
 MIDDLEWARE = [
@@ -164,6 +165,9 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 25,
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_THROTTLE_RATES': {
+        'ai_chat': '20/hour',
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -228,3 +232,27 @@ EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True').lower() in ('true', '1',
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
+
+# ---------------------------------------------------------------------------
+# AI Assistant (Mistral + LangChain)
+# ---------------------------------------------------------------------------
+
+MISTRAL_API_KEY = os.environ.get('MISTRAL_API_KEY', '')
+
+# Mistral model to use. mistral-large-latest gives best SQL quality.
+# Switch to open-mixtral-8x22b for lower cost.
+MISTRAL_MODEL = os.environ.get('MISTRAL_MODEL', 'mistral-large-latest')
+
+# Read-only Supabase connection for the AI agent (use direct port 5432, NOT
+# PgBouncer port 6543 — SQLAlchemy manages its own connection pool).
+# Create a Supabase role with SELECT-only privileges and point this here.
+AI_ASSISTANT_DB_URL = os.environ.get(
+    'AI_ASSISTANT_DB_URL',
+    os.environ.get('DATABASE_URL', ''),  # fallback to main DB if not set
+)
+
+# Number of previous messages loaded into the agent's context window.
+AI_CHAT_HISTORY_WINDOW = 10
+
+# Set True in development to see agent reasoning steps in the console.
+AI_AGENT_VERBOSE = DEBUG
