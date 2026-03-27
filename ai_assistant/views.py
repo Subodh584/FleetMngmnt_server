@@ -30,13 +30,14 @@ class AIChatThrottle(UserRateThrottle):
 
 class ChatView(APIView):
     """
-    Send a message to the Fleet Management AI assistant.
+    Intelligent dispatch ingestion hooking real human language onto LangChain execution agents natively.
+    Limits abuse strictly via Throttles enforcing API consumption budgets proactively.
 
     POST body:
-        message    (str, required)  – The user's question (max 1000 chars)
-        session_id (int, optional)  – Existing session ID; omit to start a new one
+        message    (str, required)  – The user's semantic intention block (max 1000 chars)
+        session_id (int, optional)  – Tracks contiguous window context (creates new natively if omitted)
 
-    Returns the AI response and the session_id for follow-up messages.
+    Returns parsed logical dict outputs representing database resolutions wrapped securely in human text.
     """
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [AIChatThrottle]

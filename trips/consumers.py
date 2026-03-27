@@ -19,11 +19,18 @@ from trips.models import GpsLog, Trip
 
 
 class GpsTrackingConsumer(AsyncJsonWebsocketConsumer):
+    """
+    Secure WebSockets pipeline capable of ingesting high-throughput incoming Geo payloads
+    directly from active Driver mobile apps, logging them sustainably into Postgres tables,
+    and pushing subsequent identical broadcasts down synchronously to observant Fleet Dashboards.
+    """
     async def connect(self):
+        """Establishes authenticated stream logic binding dynamically against specific operational Trip streams."""
         self.trip_id = self.scope['url_route']['kwargs']['trip_id']
         self.group_name = f'trip_{self.trip_id}_tracking'
         user = self.scope.get('user')
 
+        # Drop invalid identities explicitly at connection-start rather than later at runtime.
         if not user or user.is_anonymous:
             await self.close()
             return
@@ -32,9 +39,14 @@ class GpsTrackingConsumer(AsyncJsonWebsocketConsumer):
         await self.accept()
 
     async def disconnect(self, close_code):
+        """Releases the bound stream cleanly when client drops unexpectedly or completes run."""
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
     async def receive_json(self, content, **kwargs):
+        """
+        Massively optimized ingestor loop mapping the dictionary contents directly to Python variables, 
+        passing them safely to Async DB insertions, and looping the output via broadcast channels. 
+        """
         user = self.scope.get('user')
         if not user or user.is_anonymous:
             return
@@ -48,7 +60,7 @@ class GpsTrackingConsumer(AsyncJsonWebsocketConsumer):
             await self.send_json({'error': 'latitude and longitude are required.'})
             return
 
-        # Persist to database
+        # Securely orchestrate the relational insert via Async context encapsulation
         gps_log = await self._save_gps_log(
             trip_id=self.trip_id,
             latitude=latitude,
@@ -57,7 +69,7 @@ class GpsTrackingConsumer(AsyncJsonWebsocketConsumer):
             heading_deg=heading_deg,
         )
 
-        # Broadcast to group
+        # Broadcast the successfully verified object metrics to the underlying room pool immediately
         await self.channel_layer.group_send(
             self.group_name,
             {
@@ -74,11 +86,15 @@ class GpsTrackingConsumer(AsyncJsonWebsocketConsumer):
         )
 
     async def gps_update(self, event):
-        """Handler for gps_update group messages."""
+        """Standard JSON forwarder for `gps_update` group messages natively configured within Channels."""
         await self.send_json(event['data'])
 
     @database_sync_to_async
     def _save_gps_log(self, trip_id, latitude, longitude, speed_kmh, heading_deg):
+        """
+        Synchronous database hook securely guarded by Django ORM mechanisms.
+        Protects the global query layer from asynchronous blockages natively.
+        """
         try:
             trip = Trip.objects.select_related('vehicle').get(id=trip_id)
             return GpsLog.objects.create(

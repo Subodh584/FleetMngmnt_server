@@ -2,11 +2,11 @@
 Notification and Chat WebSocket consumers.
 
 NotificationConsumer: ws/notifications/?token=<JWT>
-  - Receives real-time push notifications.
+  - Receives real-time push notifications continuously without explicit polling.
 
 ChatConsumer: ws/chat/<peer_user_id>/?token=<JWT>
-  - Real-time messaging between two users.
-  - Send: {"content": "Hello!", "trip_id": null}
+  - Native real-time socket layer connecting dynamically constructed user instances.
+  - Send explicitly: {"content": "Hello!", "trip_id": null}
 """
 
 from channels.db import database_sync_to_async
@@ -21,6 +21,10 @@ from .models import Message, Notification
 # ---------------------------------------------------------------------------
 
 class NotificationConsumer(AsyncJsonWebsocketConsumer):
+    """
+    Subscribes native mobile/web interfaces immediately to dedicated persistent rooms natively binding their Identity.
+    Passively intakes System events dynamically generated via Signals and triggers localized OS alert pops.
+    """
     async def connect(self):
         user = self.scope.get('user')
         if not user or user.is_anonymous:
@@ -35,11 +39,12 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
         user = self.scope.get('user')
         if user and not user.is_anonymous:
             await self.channel_layer.group_discard(
-                f'user_{user.id}_notifications', self.channel_name,
+                self.group_name, self.channel_name,
             )
 
     async def receive_json(self, content, **kwargs):
-        # Client can acknowledge / mark notifications read
+        """Handles reciprocal ACK patterns when explicit UI interactions demand clearing notification dots."""
+        # Client can acknowledge / mark notifications read directly via sockets avoiding REST overhead.
         action = content.get('action')
         if action == 'mark_read':
             notification_id = content.get('notification_id')
@@ -47,11 +52,12 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
                 await self._mark_notification_read(notification_id)
 
     async def push_notification(self, event):
-        """Handler for push_notification type messages from channel layer."""
+        """Handler for 'push_notification' type messages bridging from the explicit global channel layer."""
         await self.send_json(event['data'])
 
     @database_sync_to_async
     def _mark_notification_read(self, notification_id):
+        """Bridges asynchronous WebSockets into the blocking synchronized Database securely."""
         try:
             notif = Notification.objects.get(
                 id=notification_id, user=self.scope['user'],
@@ -68,6 +74,10 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
 # ---------------------------------------------------------------------------
 
 class ChatConsumer(AsyncJsonWebsocketConsumer):
+    """
+    Maintains rigorous isolation mathematically via UserID-sorting logic.
+    Provides immediate message syncing reliably alongside automated push-notification fallback generation.
+    """
     async def connect(self):
         user = self.scope.get('user')
         if not user or user.is_anonymous:
@@ -75,7 +85,8 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             return
 
         self.peer_id = self.scope['url_route']['kwargs']['peer_id']
-        # Create a deterministic group name for the two users
+        
+        # Create a deterministic group name mapping universally valid for either end independently.
         ids = sorted([str(user.id), str(self.peer_id)])
         self.group_name = f'chat_{ids[0]}_{ids[1]}'
 
@@ -86,6 +97,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         await self.channel_layer.group_discard(self.group_name, self.channel_name)
 
     async def receive_json(self, content, **kwargs):
+        """
+        Receives inbound explicit human-text blocks.
+        Writes to DB natively, Broadcasts across room securely, translates to Global user notifications transparently.
+        """
         user = self.scope.get('user')
         if not user or user.is_anonymous:
             return
@@ -96,10 +111,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
         trip_id = content.get('trip_id')
 
-        # Save message to DB
+        # Persist standard message blocks directly synchronously ensuring no drops.
         message = await self._save_message(user.id, int(self.peer_id), text, trip_id)
 
-        # Broadcast to group
+        # Broadcast payload down to explicitly open socket receivers globally identically.
         await self.channel_layer.group_send(
             self.group_name,
             {
@@ -115,7 +130,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             },
         )
 
-        # Also push a notification to the receiver
+        # Cross-route a system notification actively just in case the receiver app was natively minimized visually.
         await self.channel_layer.group_send(
             f'user_{self.peer_id}_notifications',
             {
@@ -131,7 +146,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         )
 
     async def chat_message(self, event):
-        """Handler for chat_message type messages."""
+        """Native pipeline handling internal specific 'chat_message' explicit bindings smoothly."""
         await self.send_json(event['data'])
 
     @database_sync_to_async

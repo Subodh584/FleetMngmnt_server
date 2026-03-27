@@ -11,20 +11,22 @@ from .models import (
 
 
 # ---------------------------------------------------------------------------
-# Inline location (used inside trip briefing)
+# Inline Location (Used strictly inside deep trip briefing maps)
 # ---------------------------------------------------------------------------
 
 class InlineLocationSerializer(serializers.ModelSerializer):
+    """Read-only breakdown of a physical location context."""
     class Meta:
         model = Location
         fields = ['id', 'name', 'address', 'latitude', 'longitude', 'is_warehouse']
 
 
 # ---------------------------------------------------------------------------
-# Inline drop point (used inside trip briefing destinations)
+# Inline Drop Point (Used inside trip briefing destinations)
 # ---------------------------------------------------------------------------
 
 class InlineDropPointSerializer(serializers.ModelSerializer):
+    """Extends individual destinations to contain actual coordinate geography under `location`."""
     location = InlineLocationSerializer(read_only=True)
 
     class Meta:
@@ -41,15 +43,17 @@ class InlineDropPointSerializer(serializers.ModelSerializer):
 # ---------------------------------------------------------------------------
 
 class OrderDropPointSerializer(serializers.ModelSerializer):
+    """Standard deserialization matching an active Order Drop Point node."""
     class Meta:
         model = OrderDropPoint
         fields = '__all__'
         read_only_fields = ['order', 'created_at']
         # arrived_at / delivered_at are auto-set by the viewset's perform_update
-        # but kept writable at the serializer level so save(**extra) can set them
+        # but kept writable at the serializer level so save(**extra) can securely attach them internally
 
 
 class OrderDropPointWriteSerializer(serializers.Serializer):
+    """Unbound ingestion shell for staging bulk insertions of new route destinations."""
     location_id = serializers.IntegerField()
     sequence_no = serializers.IntegerField()
     contact_name = serializers.CharField(max_length=150, required=False, default='')
@@ -58,7 +62,7 @@ class OrderDropPointWriteSerializer(serializers.Serializer):
 
 
 class BulkDropPointSerializer(serializers.Serializer):
-    """Used for PATCH /orders/{id}/drop_points/ — replaces all drop points."""
+    """Used specifically for mapping PATCH /orders/{id}/drop_points/ where it replaces all drop points."""
     drop_points = OrderDropPointWriteSerializer(many=True)
 
     def validate_drop_points(self, value):
@@ -66,11 +70,12 @@ class BulkDropPointSerializer(serializers.Serializer):
             raise serializers.ValidationError('drop_points must contain at least one entry.')
         seq_nums = [item['sequence_no'] for item in value]
         if len(seq_nums) != len(set(seq_nums)):
-            raise serializers.ValidationError('sequence_no values must be unique within the list.')
+            raise serializers.ValidationError('sequence_no values must be strictly unique within the list.')
         return value
 
 
 class OrderSerializer(serializers.ModelSerializer):
+    """Core translation of the Order entity, packaging the nested list of its route points natively."""
     drop_points = OrderDropPointSerializer(many=True, read_only=True)
 
     class Meta:
@@ -80,6 +85,7 @@ class OrderSerializer(serializers.ModelSerializer):
 
 
 class OrderCreateSerializer(serializers.ModelSerializer):
+    """Asynchronous payload resolver that creates an Order while generating its DropPoints efficiently."""
     drop_points = OrderDropPointWriteSerializer(many=True, write_only=True)
 
     class Meta:
@@ -89,7 +95,10 @@ class OrderCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         drop_points_data = validated_data.pop('drop_points')
         user = self.context['request'].user
+        
         order = Order.objects.create(created_by=user, **validated_data)
+        
+        # Hydrate all destination drops via bulk memory mapping to reduce I/O overhead
         drop_objs = [
             OrderDropPoint(
                 order=order,
@@ -105,6 +114,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         return order
 
     def to_representation(self, instance):
+        # Reparse through the standard readable map instead of retaining raw write forms
         return OrderSerializer(instance).data
 
 
@@ -120,9 +130,15 @@ class RouteSerializer(serializers.ModelSerializer):
 
 
 class TripSerializer(serializers.ModelSerializer):
+    """
+    Comprehensive mapping payload summarizing all driver constraints, contexts,
+    and routing geometries into one massive unified state tree.
+    """
     route_detail = RouteSerializer(read_only=True)
     vehicle_detail = VehicleSerializer(source='vehicle', read_only=True)
     driver_detail = UserSerializer(source='driver', read_only=True)
+    
+    # Method-injected dynamic mappings referencing nested relational data safely
     source = serializers.SerializerMethodField()
     destinations = serializers.SerializerMethodField()
 
@@ -132,7 +148,7 @@ class TripSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
     def get_source(self, obj):
-        """Warehouse the trip departs from."""
+        """Resolves the physical Warehouse geography dynamically where the trip commences."""
         try:
             warehouse = obj.order.warehouse
             return InlineLocationSerializer(warehouse).data
@@ -140,7 +156,7 @@ class TripSerializer(serializers.ModelSerializer):
             return None
 
     def get_destinations(self, obj):
-        """All ordered drop points for the trip's order."""
+        """Retrieves and sequentially arranges all drop requirements tied underneath the bound Order."""
         try:
             drop_points = obj.order.drop_points.select_related('location').order_by('sequence_no')
             return InlineDropPointSerializer(drop_points, many=True).data
@@ -149,6 +165,7 @@ class TripSerializer(serializers.ModelSerializer):
 
 
 class TripCreateSerializer(serializers.ModelSerializer):
+    """Strict instantiation wrapper tying drivers and assets to their dispatch tasks."""
     class Meta:
         model = Trip
         fields = [
@@ -166,7 +183,7 @@ class TripCreateSerializer(serializers.ModelSerializer):
 
 
 # ---------------------------------------------------------------------------
-# Route deviations
+# Route Deviations
 # ---------------------------------------------------------------------------
 
 class RouteDeviationSerializer(serializers.ModelSerializer):
@@ -188,7 +205,7 @@ class GpsLogSerializer(serializers.ModelSerializer):
 
 
 # ---------------------------------------------------------------------------
-# Geofence events
+# Geofence Events
 # ---------------------------------------------------------------------------
 
 class GeofenceEventSerializer(serializers.ModelSerializer):
@@ -217,7 +234,7 @@ class FuelLogSerializer(serializers.ModelSerializer):
 
 
 # ---------------------------------------------------------------------------
-# Driver location
+# Driver Location Stream
 # ---------------------------------------------------------------------------
 
 class DriverLocationSerializer(serializers.ModelSerializer):
@@ -228,6 +245,7 @@ class DriverLocationSerializer(serializers.ModelSerializer):
 
 
 class DriverLocationUpdateSerializer(serializers.Serializer):
+    """High-throughput lightweight struct for ingesting repeated WebSocket/REST pings."""
     trip_id = serializers.IntegerField()
     latitude = serializers.DecimalField(max_digits=10, decimal_places=7)
     longitude = serializers.DecimalField(max_digits=10, decimal_places=7)
@@ -236,7 +254,7 @@ class DriverLocationUpdateSerializer(serializers.Serializer):
 
 
 # ---------------------------------------------------------------------------
-# Delivery proof
+# Delivery Proof
 # ---------------------------------------------------------------------------
 
 class DeliveryProofSerializer(serializers.ModelSerializer):
@@ -247,7 +265,7 @@ class DeliveryProofSerializer(serializers.ModelSerializer):
 
 
 # ---------------------------------------------------------------------------
-# Odometer images
+# Odometer Images
 # ---------------------------------------------------------------------------
 
 class OdometerImageSerializer(serializers.ModelSerializer):

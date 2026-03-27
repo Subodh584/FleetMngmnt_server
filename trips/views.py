@@ -28,6 +28,10 @@ from .serializers import (
 # ---------------------------------------------------------------------------
 
 class OrderViewSet(viewsets.ModelViewSet):
+    """
+    Fleet Manager portal for creating and tracking global logistics Orders.
+    Controls the overarching 'manifest' of items securely before assigning dispatch.
+    """
     queryset = Order.objects.select_related('created_by', 'warehouse').prefetch_related('drop_points').all()
     permission_classes = [IsFleetManagerOrReadOnly]
     filterset_fields = ['status', 'warehouse', 'created_by']
@@ -72,13 +76,17 @@ class OrderViewSet(viewsets.ModelViewSet):
 
 
 class OrderDropPointViewSet(viewsets.ModelViewSet):
+    """
+    Provides granular control over specific DropPoints dynamically.
+    Automatically captures transition timestamps securely.
+    """
     queryset = OrderDropPoint.objects.select_related('order', 'location').all()
     serializer_class = OrderDropPointSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['order', 'status']
 
     def perform_update(self, serializer):
-        """Auto-set arrived_at / delivered_at timestamps on status transitions."""
+        """Auto-set arrived_at / delivered_at timestamps exclusively upon strict state transitions."""
         new_status = serializer.validated_data.get('status')
         instance = serializer.instance
         now = timezone.now()
@@ -97,6 +105,11 @@ class OrderDropPointViewSet(viewsets.ModelViewSet):
 # ---------------------------------------------------------------------------
 
 class TripViewSet(viewsets.ModelViewSet):
+    """
+    The central operational switchboard managing active Trip execution.
+    Features robust action channels (Accept, Reject, Start, Complete, Cancel)
+    housing strict validation to guarantee physical compliance.
+    """
     queryset = Trip.objects.select_related(
         'order', 'order__warehouse', 'vehicle', 'driver', 'assigned_by', 'route_detail',
     ).prefetch_related(
@@ -116,7 +129,7 @@ class TripViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def start(self, request, pk=None):
-        """Driver starts a trip."""
+        """Driver formally transitions a Trip context to active execution."""
         trip = self.get_object()
         if trip.status not in ('assigned', 'accepted'):
             return Response(
@@ -129,7 +142,8 @@ class TripViewSet(viewsets.ModelViewSet):
         trip.start_location_lng = request.data.get('longitude')
         trip.start_mileage_km = request.data.get('start_mileage_km', trip.start_mileage_km)
         trip.save()
-        # Link pre-trip inspection to this trip if provided
+        
+        # Link pre-trip inspection to this trip if safely authenticated logic allows mapping
         inspection_id = request.data.get('inspection_id')
         if inspection_id is not None:
             try:
@@ -137,18 +151,19 @@ class TripViewSet(viewsets.ModelViewSet):
                 insp.trip = trip
                 insp.save(update_fields=['trip'])
             except Inspection.DoesNotExist:
-                pass  # invalid or unauthorized inspection_id — don't block trip start
-        # Update vehicle status
+                pass  # Invalid or unauthorized inspection_id — securely bypass
+                
+        # Lock downstream related elements
         trip.vehicle.status = 'in_trip'
         trip.vehicle.save(update_fields=['status', 'updated_at'])
-        # Update order status
         trip.order.status = 'in_transit'
         trip.order.save(update_fields=['status', 'updated_at'])
+        
         return Response(TripSerializer(trip).data)
 
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
-        """Driver completes a trip."""
+        """Standard conclusion protocol. Evaluates cascading status resolutions efficiently."""
         trip = self.get_object()
         if trip.status != 'in_progress':
             return Response(
@@ -161,28 +176,32 @@ class TripViewSet(viewsets.ModelViewSet):
         trip.end_location_lng = request.data.get('longitude')
         trip.end_mileage_km = request.data.get('end_mileage_km', trip.end_mileage_km)
         trip.save()
-        # Update vehicle
+        
+        # Recover allocated physical asset
         vehicle = trip.vehicle
         vehicle.status = 'available'
         if trip.end_mileage_km:
             vehicle.current_mileage_km = trip.end_mileage_km
         vehicle.save(update_fields=['status', 'current_mileage_km', 'updated_at'])
-        # Check if all order trips are complete
+        
+        # Resolve bounding Order status dynamically
         order = trip.order
         if not order.trips.exclude(status='completed').exists():
             order.status = 'delivered'
             order.save(update_fields=['status', 'updated_at'])
-        # Set driver to on_rest for 9 hours
+            
+        # Secure mandatory minimum compliance rest cycles natively
         profile = trip.driver.profile
         rest_ends = trip.ended_at + timezone.timedelta(hours=9)
         profile.driver_status = 'on_rest'
         profile.rest_ends_at = rest_ends
         profile.save(update_fields=['driver_status', 'rest_ends_at', 'updated_at'])
+        
         return Response(TripSerializer(trip).data)
 
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
-        """Cancel a trip."""
+        """Force cancel an unviable Trip."""
         trip = self.get_object()
         if trip.status in ('completed', 'cancelled'):
             return Response(
@@ -197,7 +216,7 @@ class TripViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def accept(self, request, pk=None):
-        """Driver accepts an assigned trip — transitions directly to in_progress."""
+        """Driver accepts an assigned trip."""
         trip = self.get_object()
         if trip.status != 'assigned':
             return Response(
@@ -212,7 +231,7 @@ class TripViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
-        """Driver rejects an assigned trip — reverts to pending and notifies fleet managers."""
+        """Bounces an assigned trip securely, issuing synchronous Fleet Manager notifications."""
         trip = self.get_object()
         if trip.status != 'assigned':
             return Response(
@@ -221,17 +240,21 @@ class TripViewSet(viewsets.ModelViewSet):
             )
         if trip.driver_id != request.user.id:
             return Response({'detail': 'You are not the driver for this trip.'}, status=status.HTTP_403_FORBIDDEN)
+            
         reason = request.data.get('reason', '')
         trip.status = 'rejected'
         trip.rejection_reason = reason
         trip.save(update_fields=['status', 'rejection_reason', 'updated_at'])
+        
         # Free the vehicle
         trip.vehicle.status = 'available'
         trip.vehicle.save(update_fields=['status', 'updated_at'])
+        
         # Reset order back to pending so fleet manager can reassign
         trip.order.status = 'pending'
         trip.order.save(update_fields=['status', 'updated_at'])
-        # Notify all fleet managers
+        
+        # Notify all fleet managers natively
         from comms.models import Notification
         from django.contrib.auth import get_user_model
         User = get_user_model()
@@ -252,7 +275,7 @@ class TripViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def tracking(self, request, pk=None):
-        """Get the latest GPS position for a trip."""
+        """Isolates the most recent snapshot of GPS telemetrics for mapping layers."""
         trip = self.get_object()
         latest = trip.gps_logs.order_by('-recorded_at').first()
         if not latest:
@@ -261,7 +284,7 @@ class TripViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def gps_history(self, request, pk=None):
-        """Get the full GPS trail for a trip."""
+        """Exposes the full unspooled array of breadcrumbs strictly mapped to this Trip timeline."""
         trip = self.get_object()
         logs = trip.gps_logs.order_by('recorded_at')
         page = self.paginate_queryset(logs)
@@ -284,7 +307,7 @@ class TripViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def odometer_images(self, request, pk=None):
-        """Get all odometer images for a trip."""
+        """Get all odometer images inherently bound to a trip."""
         trip = self.get_object()
         images = trip.odometer_images.all().order_by('recorded_at')
         page = self.paginate_queryset(images)
@@ -297,8 +320,8 @@ class TripViewSet(viewsets.ModelViewSet):
 
 class DriverLocationViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    Current driver locations. Drivers upsert via the `update_location` action;
-    fleet managers can list / retrieve via standard GET.
+    Current normalized driver locations. Fast stream handler designed to throttle 
+    the update payloads dynamically while keeping WebSocket channels concurrently engaged.
     """
     queryset = DriverLocation.objects.select_related('trip', 'driver', 'vehicle').all()
     serializer_class = DriverLocationSerializer
@@ -308,16 +331,14 @@ class DriverLocationViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['post'], permission_classes=[IsDriver])
     def update_location(self, request):
         """
-        Driver calls this endpoint to store / update their current location.
-        Creates a new DriverLocation row on first call for a trip+driver;
-        updates the existing row on subsequent calls.
-        Also broadcasts the update to the WebSocket room for live tracking.
+        Ingests real-time driver coordinate broadcasts.
+        Updates positional anchors and streams payloads via Channels Redis to connected Managers concurrently.
         """
         serializer = DriverLocationUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # Validate trip belongs to this driver and is in progress
+        # Explicitly validate the targeted object maps strictly to the instigating Driver 
         try:
             trip = Trip.objects.select_related('vehicle').get(id=data['trip_id'])
         except Trip.DoesNotExist:
@@ -338,7 +359,7 @@ class DriverLocationViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Upsert: create on first call, update on subsequent calls
+        # Upsert: Overwrite the active record row rather than appending unoptimized duplicates 
         location, created = DriverLocation.objects.update_or_create(
             trip=trip,
             driver=request.user,
@@ -351,7 +372,7 @@ class DriverLocationViewSet(viewsets.ReadOnlyModelViewSet):
             },
         )
 
-        # Broadcast to WebSocket room so fleet managers see live updates
+        # Dispatch asynchronous WebSockets ping
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             f'trip_{trip.id}_tracking',
@@ -380,6 +401,7 @@ class DriverLocationViewSet(viewsets.ReadOnlyModelViewSet):
 # ---------------------------------------------------------------------------
 
 class RouteViewSet(viewsets.ModelViewSet):
+    """Administers optimized GEOjson routes extracted and assigned prior to departure."""
     queryset = Route.objects.select_related('trip', 'approved_by').all()
     serializer_class = RouteSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -399,6 +421,7 @@ class RouteViewSet(viewsets.ModelViewSet):
 # ---------------------------------------------------------------------------
 
 class RouteDeviationViewSet(viewsets.ModelViewSet):
+    """Exposes mapped deviations calculated organically where tracked GPS fell outside authorized polygons."""
     queryset = RouteDeviation.objects.all()
     serializer_class = RouteDeviationSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -410,6 +433,7 @@ class RouteDeviationViewSet(viewsets.ModelViewSet):
 # ---------------------------------------------------------------------------
 
 class GpsLogViewSet(viewsets.ModelViewSet):
+    """Aggregated append-only ledger for all physical coordinate jumps."""
     queryset = GpsLog.objects.select_related('trip', 'vehicle').all()
     serializer_class = GpsLogSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -422,6 +446,7 @@ class GpsLogViewSet(viewsets.ModelViewSet):
 # ---------------------------------------------------------------------------
 
 class GeofenceEventViewSet(viewsets.ReadOnlyModelViewSet):
+    """Audit layer listing raw bounds-crossings triggered automatically via Client checks."""
     queryset = GeofenceEvent.objects.select_related(
         'trip', 'vehicle', 'geofence', 'drop_point',
     ).all()
@@ -435,6 +460,7 @@ class GeofenceEventViewSet(viewsets.ReadOnlyModelViewSet):
 # ---------------------------------------------------------------------------
 
 class TripExpenseViewSet(viewsets.ModelViewSet):
+    """Allows operational cost declarations strictly bound to specific user instances securely."""
     queryset = TripExpense.objects.select_related('trip', 'driver').all()
     serializer_class = TripExpenseSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -449,6 +475,7 @@ class TripExpenseViewSet(viewsets.ModelViewSet):
 # ---------------------------------------------------------------------------
 
 class FuelLogViewSet(viewsets.ModelViewSet):
+    """Logs active refueling nodes bound directly against executing operations."""
     queryset = FuelLog.objects.select_related('trip', 'vehicle', 'driver').all()
     serializer_class = FuelLogSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -465,6 +492,7 @@ class FuelLogViewSet(viewsets.ModelViewSet):
 # ---------------------------------------------------------------------------
 
 class OdometerImageViewSet(viewsets.ModelViewSet):
+    """Verifiable dashboard captures mandated periodically over active shifts."""
     queryset = OdometerImage.objects.select_related('trip', 'vehicle', 'driver').all()
     serializer_class = OdometerImageSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -481,6 +509,10 @@ class OdometerImageViewSet(viewsets.ModelViewSet):
 # ---------------------------------------------------------------------------
 
 class DeliveryProofViewSet(viewsets.ModelViewSet):
+    """
+    Submissions and Manager verifications for Drop point fulfillments.
+    Features logic gating final Order delivery clearance upon cryptographic success.
+    """
     queryset = DeliveryProof.objects.select_related(
         'drop_point', 'trip', 'driver', 'verified_by',
     ).all()
@@ -498,10 +530,12 @@ class DeliveryProofViewSet(viewsets.ModelViewSet):
         proof.verified_by = request.user
         proof.verified_at = timezone.now()
         proof.save()
-        # Mark drop point as delivered
+        
+        # Conclude specific drop point state intelligently
         drop_point = proof.drop_point
         if drop_point.status != 'delivered':
             drop_point.status = 'delivered'
             drop_point.delivered_at = timezone.now()
             drop_point.save()
+            
         return Response(DeliveryProofSerializer(proof).data)

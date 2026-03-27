@@ -3,6 +3,10 @@ from django.db import models
 
 
 class Order(models.Model):
+    """
+    Represents a high-level logistics Order representing goods to be delivered.
+    Acts as the parent container for multiple OrderDropPoint destinations.
+    """
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('assigned', 'Assigned'),
@@ -20,8 +24,11 @@ class Order(models.Model):
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     notes = models.TextField(blank=True, default='')
+    
+    # Payload requirements used for vehicle matching
     capacity_litre = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     capacity_kg = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -33,6 +40,10 @@ class Order(models.Model):
 
 
 class OrderDropPoint(models.Model):
+    """
+    A specific destination mapped against an Order. 
+    Maintains sequence scheduling, live delivery states, and contact coordinates.
+    """
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('in_transit', 'In Transit'),
@@ -46,9 +57,13 @@ class OrderDropPoint(models.Model):
         'core.Location', on_delete=models.CASCADE, related_name='drop_points',
     )
     sequence_no = models.IntegerField()
+    
+    # Destination Contact Info
     contact_name = models.CharField(max_length=150, blank=True, default='')
     contact_phone = models.CharField(max_length=20, blank=True, default='')
     notes = models.TextField(blank=True, default='')
+    
+    # Lifecycle Timestamps & State
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     eta = models.DateTimeField(null=True, blank=True)
     arrived_at = models.DateTimeField(null=True, blank=True)
@@ -65,6 +80,10 @@ class OrderDropPoint(models.Model):
 
 
 class Trip(models.Model):
+    """
+    The active operational binding between an Order, a Vehicle, and a Driver.
+    Tracks live metrics, status progressions, and structural deviations.
+    """
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('assigned', 'Assigned'),
@@ -87,20 +106,27 @@ class Trip(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='assigned_trips',
     )
+    
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='assigned')
     route = models.OneToOneField(
         'Route', on_delete=models.SET_NULL, null=True, blank=True, related_name='trip_ref',
     )
+    
+    # Mileage Telemetry
     start_mileage_km = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     end_mileage_km = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    
+    # Start and Stop Anchor Geocoordinates
     start_location_lat = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     start_location_lng = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     end_location_lat = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     end_location_lng = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    
     rejection_reason = models.TextField(blank=True, default='')
     started_at = models.DateTimeField(null=True, blank=True)
     ended_at = models.DateTimeField(null=True, blank=True)
     scheduled_start = models.DateTimeField(null=True, blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -112,14 +138,21 @@ class Trip(models.Model):
 
 
 class Route(models.Model):
+    """
+    Stores an optimized routing path derived prior to dispatch.
+    Houses a GeoJSON representation of the path, along with distance and duration estimates.
+    """
     trip = models.OneToOneField(Trip, on_delete=models.CASCADE, related_name='route_detail')
     origin_lat = models.DecimalField(max_digits=10, decimal_places=7)
     origin_lng = models.DecimalField(max_digits=10, decimal_places=7)
     destination_lat = models.DecimalField(max_digits=10, decimal_places=7)
     destination_lng = models.DecimalField(max_digits=10, decimal_places=7)
+    
+    # Serialized Polyline or GeoJSON waypoints
     optimized_path = models.JSONField(null=True, blank=True)
     total_distance_km = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     estimated_duration_min = models.IntegerField(null=True, blank=True)
+    
     approved_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='approved_routes',
@@ -136,6 +169,10 @@ class Route(models.Model):
 
 
 class RouteDeviation(models.Model):
+    """
+    Records incidents where real-time GPS coordinates broke the threshold radius
+    expected against the `optimized_path` found in the Route model.
+    """
     trip = models.ForeignKey(Trip, on_delete=models.CASCADE, related_name='route_deviations')
     latitude = models.DecimalField(max_digits=10, decimal_places=7)
     longitude = models.DecimalField(max_digits=10, decimal_places=7)
@@ -151,6 +188,10 @@ class RouteDeviation(models.Model):
 
 
 class GpsLog(models.Model):
+    """
+    Raw, time-series telemetry records streamed via driver client devices.
+    Highly optimized table index configuration designed for massive insert scales.
+    """
     trip = models.ForeignKey(Trip, on_delete=models.CASCADE, related_name='gps_logs')
     vehicle = models.ForeignKey(
         'fleet.Vehicle', on_delete=models.CASCADE, related_name='gps_logs',
@@ -173,6 +214,10 @@ class GpsLog(models.Model):
 
 
 class GeofenceEvent(models.Model):
+    """
+    A concrete event log signifying a vehicle breaching a predefined Core Geofence boundary.
+    Can be used to calculate physical detention time and automate DropPoint statuses.
+    """
     EVENT_TYPE_CHOICES = [
         ('entry', 'Entry'),
         ('exit', 'Exit'),
@@ -204,6 +249,9 @@ class GeofenceEvent(models.Model):
 
 
 class TripExpense(models.Model):
+    """
+    Drivers log ad-hoc operational expenses on-the-go (Tolls, Parking, etc).
+    """
     EXPENSE_TYPE_CHOICES = [
         ('fuel', 'Fuel'),
         ('toll', 'Toll'),
@@ -219,8 +267,11 @@ class TripExpense(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=3, default='INR')
     description = models.TextField(blank=True, default='')
+    
+    # Ledger attachments
     receipt_url = models.URLField(blank=True, default='')
     receipt_image = models.ImageField(upload_to='expense_receipts/', blank=True, null=True)
+    
     recorded_at = models.DateTimeField(auto_now_add=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -232,6 +283,10 @@ class TripExpense(models.Model):
 
 
 class FuelLog(models.Model):
+    """
+    Captures highly detailed fueling events specifically to track 
+    Vehicle efficiency (L/km) over time and prevent budget leakages.
+    """
     trip = models.ForeignKey(Trip, on_delete=models.CASCADE, related_name='fuel_logs')
     vehicle = models.ForeignKey(
         'fleet.Vehicle', on_delete=models.CASCADE, related_name='fuel_logs',
@@ -244,6 +299,8 @@ class FuelLog(models.Model):
     total_cost = models.DecimalField(max_digits=10, decimal_places=2)
     odometer_km = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     fuel_station = models.CharField(max_length=200, blank=True, default='')
+    
+    # Audit Proofs
     receipt_url = models.URLField(blank=True, default='')
     receipt_image = models.ImageField(upload_to='fuel_receipts/', blank=True, null=True)
     logged_at = models.DateTimeField(auto_now_add=True)
@@ -256,7 +313,10 @@ class FuelLog(models.Model):
 
 
 class DriverLocation(models.Model):
-    """Current location of a driver on a trip. One row per trip+driver, upserted on each update."""
+    """
+    Current normalized location of a driver on an active trip. 
+    Strictly upserts via the cache layer; acts as the primary query source for live dashboard mapping.
+    """
     trip = models.ForeignKey(Trip, on_delete=models.CASCADE, related_name='driver_locations')
     driver = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='driver_locations',
@@ -279,6 +339,10 @@ class DriverLocation(models.Model):
 
 
 class DeliveryProof(models.Model):
+    """
+    Cryptographic or photographic documentation establishing strict completion of drop-offs.
+    Gates the transition of OrderDropPoints to 'delivered' status.
+    """
     PROOF_TYPE_CHOICES = [
         ('photo', 'Photo'),
         ('signature', 'Signature'),
@@ -293,11 +357,14 @@ class DeliveryProof(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='delivery_proofs',
     )
     proof_type = models.CharField(max_length=25, choices=PROOF_TYPE_CHOICES)
+    
+    # Evidence Hooks
     file_url = models.FileField(upload_to='delivery_proofs/', blank=True, null=True)
     digital_confirmation_code = models.CharField(max_length=100, blank=True, default='')
     latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     submitted_at = models.DateTimeField(auto_now_add=True)
+    
     verified_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='verified_proofs',
@@ -312,6 +379,10 @@ class DeliveryProof(models.Model):
 
 
 class OdometerImage(models.Model):
+    """
+    Physical photographic checks of the dashboard odometer, typically 
+    required during pre-trip start and post-trip end events for fraud prevention.
+    """
     trip = models.ForeignKey(Trip, on_delete=models.CASCADE, related_name='odometer_images')
     vehicle = models.ForeignKey(
         'fleet.Vehicle', on_delete=models.CASCADE, related_name='odometer_images',

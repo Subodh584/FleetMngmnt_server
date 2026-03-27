@@ -14,7 +14,11 @@ from .models import Trip
 
 @receiver(post_save, sender=Trip)
 def trip_status_notification(sender, instance, created, **kwargs):
-    """Notify the driver when a trip is assigned or status changes."""
+    """
+    Listens for Trip saving events natively within Django's ORM.
+    Dispatches persistent DB notifications and ephemeral WebSocket pushes universally 
+    when drivers get assigned new trips or whenever the state transitions.
+    """
     if created:
         title = f'New trip assigned: {instance.order.order_ref}'
         body = f'Vehicle: {instance.vehicle}. Check your trips for details.'
@@ -33,7 +37,7 @@ def trip_status_notification(sender, instance, created, **kwargs):
         reference_type='trip',
     )
 
-    # Push via WebSocket
+    # Push immediately via WebSocket
     try:
         channel_layer = get_channel_layer()
         if channel_layer:
@@ -53,4 +57,4 @@ def trip_status_notification(sender, instance, created, **kwargs):
                 },
             )
     except Exception:
-        pass  # Don't break the save if channel layer is unavailable
+        pass  # Don't break the parent save context if channel layer is unreachable

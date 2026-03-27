@@ -19,6 +19,10 @@ from core.permissions import (
 
 
 class VehicleViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint giving visibility into the global fleet Vehicles registry.
+    Write access is governed securely to Fleet Managers only.
+    """
     queryset = Vehicle.objects.all()
     serializer_class = VehicleSerializer
     permission_classes = [IsFleetManagerOrReadOnly]
@@ -28,6 +32,10 @@ class VehicleViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def inspections(self, request, pk=None):
+        """
+        Nested query action: Retrieves a paginated history of Inspections
+        that have occurred for this specific vehicle instance.
+        """
         vehicle = self.get_object()
         inspections = vehicle.inspections.all().order_by('-submitted_at')
         page = self.paginate_queryset(inspections)
@@ -36,6 +44,10 @@ class VehicleViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def issues(self, request, pk=None):
+        """
+        Nested query action: Retrieves a paginated history of reported
+        Vehicle Issues associated directly with this asset.
+        """
         vehicle = self.get_object()
         issues = vehicle.issues.all().order_by('-reported_at')
         page = self.paginate_queryset(issues)
@@ -44,6 +56,10 @@ class VehicleViewSet(viewsets.ModelViewSet):
 
 
 class InspectionChecklistViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint managing the standardized templates used for driver inspections.
+    Controlled globally by maintenance & fleet management tiers.
+    """
     queryset = InspectionChecklist.objects.prefetch_related('items').all()
     serializer_class = InspectionChecklistSerializer
     permission_classes = [IsMaintenanceStaffOrFleetManager]
@@ -57,7 +73,10 @@ class InspectionChecklistViewSet(viewsets.ModelViewSet):
         permission_classes=[permissions.IsAuthenticated],
     )
     def pre_trip_default(self, request):
-        """Return the active default Pre-Trip Inspection checklist with items."""
+        """
+        Return the active default Pre-Trip Inspection checklist with its item schema.
+        This provides a dynamic, easily reachable fallback for mobile apps syncing offline specs.
+        """
         checklist = (
             InspectionChecklist.objects.prefetch_related('items')
             .filter(name='Pre-Trip Inspection', is_active=True)
@@ -72,6 +91,10 @@ class InspectionChecklistViewSet(viewsets.ModelViewSet):
 
 
 class InspectionChecklistItemViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint interacting specifically with individual questions/requirements
+    housed underneath a master Checklist record.
+    """
     queryset = InspectionChecklistItem.objects.all()
     serializer_class = InspectionChecklistItemSerializer
     permission_classes = [IsMaintenanceStaffOrFleetManager]
@@ -79,37 +102,53 @@ class InspectionChecklistItemViewSet(viewsets.ModelViewSet):
 
 
 class InspectionViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint detailing completed and pending physical evaluations of
+    fleets logged by driver teams (Pre-trip checks, Ad-Hoc damage reports, etc.).
+    """
     queryset = Inspection.objects.select_related(
         'vehicle', 'driver', 'checklist', 'reviewed_by', 'assigned_to_manager',
     ).prefetch_related('results').all()
+    
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['vehicle', 'driver', 'inspection_type', 'overall_status', 'assigned_to_manager']
     ordering_fields = ['submitted_at', 'created_at']
 
     def get_serializer_class(self):
+        # We process 'Create' requests with nested sub-models (the item results) tightly coupled
         if self.action == 'create':
             return InspectionCreateSerializer
         return InspectionSerializer
 
     @action(detail=True, methods=['post'], permission_classes=[IsMaintenanceStaffOrFleetManager])
     def review(self, request, pk=None):
-        """Maintenance staff / fleet manager reviews an inspection."""
+        """
+        Maintenance staff / fleet manager reviews an inspection.
+        Transitions the status towards 'approved' or triggers a maintenance flow constraint.
+        """
         inspection = self.get_object()
         new_status = request.data.get('overall_status')
+        
+        # Guard strictly allowable downstream lifecycle states
         if new_status not in ('approved', 'flagged', 'maintenance_scheduled'):
             return Response(
                 {'detail': 'status must be approved, flagged, or maintenance_scheduled.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+            
         inspection.overall_status = new_status
         inspection.reviewed_by = request.user
         inspection.reviewed_at = timezone.now()
         inspection.save()
+        
         return Response(InspectionSerializer(inspection).data)
 
     @action(detail=True, methods=['post'], permission_classes=[IsFleetManager])
     def approve(self, request, pk=None):
-        """Fleet manager approves a flagged inspection."""
+        """
+        Action enabling Fleet managers to legally and programably 
+        clear and greenlight a previously flagged inspection log.
+        """
         inspection = self.get_object()
         inspection.approved = True
         inspection.save(update_fields=['approved'])
@@ -117,6 +156,10 @@ class InspectionViewSet(viewsets.ModelViewSet):
 
 
 class VehicleIssueViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint acting as a comprehensive ticketing system for ongoing/recorded
+    flaws within specific vehicles ranging strictly across severity labels.
+    """
     queryset = VehicleIssue.objects.select_related(
         'vehicle',
         'reported_by', 'reported_by__profile',
@@ -125,6 +168,7 @@ class VehicleIssueViewSet(viewsets.ModelViewSet):
     ).prefetch_related(
         'inspection__results__checklist_item',
     ).all()
+    
     serializer_class = VehicleIssueSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['vehicle', 'reported_by', 'severity', 'status', 'assigned_to_manager']
@@ -132,26 +176,38 @@ class VehicleIssueViewSet(viewsets.ModelViewSet):
     ordering_fields = ['reported_at', 'severity']
 
     def get_serializer_class(self):
+        # Inject heavier detail representations solely upon targeted Retrieve actions
         if self.action == 'retrieve':
             return VehicleIssueDetailSerializer
         return VehicleIssueSerializer
 
     def perform_create(self, serializer):
+        """
+        Automatically aligns the instantiated problem record against
+        contextual references—dynamically routing it to the nearest responsible Fleet Manager
+        found upstream inside the linked trip or preceding check.
+        """
         inspection = serializer.validated_data.get('inspection')
         assigned_manager = None
+        
         if inspection:
             # Prefer the manager already stamped on the inspection record
             if inspection.assigned_to_manager_id:
                 assigned_manager = inspection.assigned_to_manager
             elif inspection.trip_id and inspection.trip.assigned_by_id:
                 assigned_manager = inspection.trip.assigned_by
+                
         serializer.save(reported_by=self.request.user, assigned_to_manager=assigned_manager)
 
     def perform_update(self, serializer):
+        """
+        Hooks state shifts to inject automation, like mapping Ownership 
+        if an unassigned report suddenly becomes 'acknowledged'.
+        """
         instance = serializer.instance
         new_status = serializer.validated_data.get('status', instance.status)
 
-        # Auto-assign the current fleet manager when they are the first to acknowledge.
+        # Auto-assign the current fleet manager when they are the first to acknowledge a lingering issue.
         if (
             new_status == 'acknowledged'
             and instance.status == 'reported'
@@ -163,7 +219,7 @@ class VehicleIssueViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], permission_classes=[IsFleetManager])
     def approve(self, request, pk=None):
-        """Fleet manager approves a vehicle issue."""
+        """Allows a Fleet manager to formally clear a logged vehicle issue as resolved and adequate."""
         issue = self.get_object()
         issue.approved = True
         issue.save(update_fields=['approved'])

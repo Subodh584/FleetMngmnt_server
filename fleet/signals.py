@@ -26,7 +26,12 @@ User = get_user_model()
 
 
 def _push_ws(user, alert_type, title, body, reference_id, reference_type):
-    """Helper: fire a WebSocket push to a single user, silently ignoring errors."""
+    """
+    Helper function executing the asynchronous Redis/Channels broadcast.
+    Fires a JSON object representing the UI Notification payload 
+    straight into the exact WebSockets group matching the `user_id`.
+    Errors are safely bypassed to prevent disrupting the core database transaction.
+    """
     try:
         channel_layer = get_channel_layer()
         if channel_layer:
@@ -48,7 +53,10 @@ def _push_ws(user, alert_type, title, body, reference_id, reference_type):
 
 
 def _bulk_notify(recipients, alert_type, title, body, reference_id, reference_type):
-    """Create DB notifications and push WebSocket messages for a queryset of users."""
+    """
+    Compiles database-level archival logs of incoming messages across an array of users 
+    simultaneously, prior to triggering instant WebSocket push delivery routines for each.
+    """
     notifications = [
         Notification(
             user=user,
@@ -60,14 +68,20 @@ def _bulk_notify(recipients, alert_type, title, body, reference_id, reference_ty
         )
         for user in recipients
     ]
+    # Commit DB notifications economically
     Notification.objects.bulk_create(notifications)
 
+    # Dispatch web-socket events
     for user in recipients:
         _push_ws(user, alert_type, title, body, reference_id, reference_type)
 
 
 @receiver(post_save, sender=VehicleIssue)
 def vehicle_issue_notification(sender, instance, created, **kwargs):
+    """
+    Listens globally for database lifecycle events triggered by VehicleIssue saves.
+    Responsible for executing state-machine based communication flows for the issue lifecycle.
+    """
     if created:
         # ── New issue reported ──────────────────────────────────────────────
         # Only fleet managers need to know at this point; they will decide
@@ -77,6 +91,7 @@ def vehicle_issue_notification(sender, instance, created, **kwargs):
             profile__role='fleet_manager',
             is_active=True,
         ))
+        
         _bulk_notify(
             recipients,
             alert_type='issue_reported',
@@ -89,12 +104,13 @@ def vehicle_issue_notification(sender, instance, created, **kwargs):
     else:
         # ── Status changed to in_repair ─────────────────────────────────────
         # The fleet manager has redirected the vehicle to maintenance.
-        # Now notify maintenance staff so they can act on it.
+        # Now notify maintenance staff so they can physically act on it.
         if instance.status == 'in_repair':
             recipients = list(User.objects.filter(
                 profile__role='maintenance_staff',
                 is_active=True,
             ))
+            
             _bulk_notify(
                 recipients,
                 alert_type='maintenance_required',

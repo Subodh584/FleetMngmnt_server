@@ -4,6 +4,7 @@ from .models import Message, Notification, SOSAlert
 
 
 class MessageSerializer(serializers.ModelSerializer):
+    """Provides internal chat histories dynamically, keeping exact ingest stamps natively un-editable."""
     class Meta:
         model = Message
         fields = '__all__'
@@ -11,6 +12,7 @@ class MessageSerializer(serializers.ModelSerializer):
 
 
 class NotificationSerializer(serializers.ModelSerializer):
+    """Maps global async push-payloads safely strictly masking identity override fields inherently."""
     class Meta:
         model = Notification
         fields = '__all__'
@@ -18,6 +20,7 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 
 class SOSAlertSerializer(serializers.ModelSerializer):
+    """Ensures distress timestamps globally restrict spoofed resolution tracking mechanically."""
     class Meta:
         model = SOSAlert
         fields = '__all__'

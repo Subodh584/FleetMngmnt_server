@@ -10,6 +10,10 @@ from .serializers import MessageSerializer, NotificationSerializer, SOSAlertSeri
 
 
 class MessageViewSet(viewsets.ModelViewSet):
+    """
+    Supports 1:1 internal native chat between explicitly authenticated users.
+    Limits data scopes dynamically based rigorously upon requesting identities securely.
+    """
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['trip', 'is_read']
@@ -17,19 +21,27 @@ class MessageViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        
+        # Accommodates swagger schema parsing smoothly without hitting unauthorized database queries.
         if getattr(self, 'swagger_fake_view', False):
             return Message.objects.none()
+            
         qs = Message.objects.filter(Q(sender=user) | Q(receiver=user))
+        
+        # Allows narrowing natively to a specific active conversational thread.
         peer = self.request.query_params.get('peer')
         if peer:
             qs = qs.filter(Q(sender_id=peer) | Q(receiver_id=peer))
+            
         return qs.select_related('sender', 'receiver', 'trip')
 
     def perform_create(self, serializer):
+        """Forces true authorship natively preventing malicious spoofing."""
         serializer.save(sender=self.request.user)
 
     @action(detail=True, methods=['post'])
     def mark_read(self, request, pk=None):
+        """Ensures receipt timestamps apply reliably."""
         message = self.get_object()
         if message.receiver != request.user:
             return Response(
@@ -50,6 +62,10 @@ class MessageViewSet(viewsets.ModelViewSet):
 
 
 class NotificationViewSet(viewsets.ModelViewSet):
+    """
+    Endpoint parsing global asynchronous Alerts for display layers smoothly.
+    Restricts explicit object visibility cleanly to targeted target identities.
+    """
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['alert_type', 'status', 'reference_type']
@@ -82,6 +98,10 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
 
 class SOSAlertViewSet(viewsets.ModelViewSet):
+    """
+    High-priority dispatch hooks handling physical location distress signals natively.
+    Exclusively locks standard operational completion behind 'IsFleetManager' resolving securely.
+    """
     queryset = SOSAlert.objects.select_related('driver', 'vehicle', 'trip').all()
     serializer_class = SOSAlertSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -89,10 +109,12 @@ class SOSAlertViewSet(viewsets.ModelViewSet):
     ordering_fields = ['triggered_at']
 
     def perform_create(self, serializer):
+        """Overrides explicit sender spoofing."""
         serializer.save(driver=self.request.user)
 
     @action(detail=True, methods=['post'], permission_classes=[IsFleetManager])
     def resolve(self, request, pk=None):
+        """Authoritative completion signal exclusively reserved for Managers securely manually closing."""
         alert = self.get_object()
         if alert.resolved:
             return Response(

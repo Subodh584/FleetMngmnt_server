@@ -3,7 +3,9 @@ from django.db import models
 
 
 class AIChatSession(models.Model):
-    """Represents one conversation thread between a user and the AI assistant."""
+    """
+    State container persisting longitudinal dialogue states for individual humans querying the AI layer.
+    """
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -23,7 +25,10 @@ class AIChatSession(models.Model):
 
 
 class AIChatMessage(models.Model):
-    """Stores a single turn (human or AI) within a chat session."""
+    """
+    Immutable ledger mapping back-and-forth LLM context block queries incrementally. 
+    Strictly tracks execution steps independently of the public payloads.
+    """
 
     ROLE_CHOICES = [
         ('human', 'Human'),

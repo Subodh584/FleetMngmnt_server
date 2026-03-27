@@ -3,6 +3,10 @@ from django.db import models
 
 
 class MaintenanceSchedule(models.Model):
+    """
+    Tracks planned upcoming service routines. Allows Fleet Managers to project
+    vehicle downtime before physical dispatch blocking occurs.
+    """
     MAINTENANCE_TYPE_CHOICES = [
         ('preventive', 'Preventive'),
         ('corrective', 'Corrective'),
@@ -27,6 +31,7 @@ class MaintenanceSchedule(models.Model):
     estimated_duration_hours = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='scheduled')
     notes = models.TextField(blank=True, default='')
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -38,6 +43,10 @@ class MaintenanceSchedule(models.Model):
 
 
 class MaintenanceRecord(models.Model):
+    """
+    Represents an active or historically completed physical repair session in the garage.
+    Links back to scheduled routines or spontaneously reported Fleet Issues natively.
+    """
     MAINTENANCE_TYPE_CHOICES = MaintenanceSchedule.MAINTENANCE_TYPE_CHOICES
     REPAIR_STATUS_CHOICES = [
         ('pending', 'Pending'),
@@ -60,6 +69,7 @@ class MaintenanceRecord(models.Model):
     maintenance_type = models.CharField(max_length=20, choices=MAINTENANCE_TYPE_CHOICES)
     description = models.TextField()
     repair_status = models.CharField(max_length=20, choices=REPAIR_STATUS_CHOICES, default='pending')
+    
     assigned_to = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='assigned_maintenance_records',
@@ -68,11 +78,14 @@ class MaintenanceRecord(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='delegated_maintenance_records',
     )
+    
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     total_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    
     mileage_at_service = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     technician_notes = models.TextField(blank=True, default='')
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -84,7 +97,10 @@ class MaintenanceRecord(models.Model):
 
 
 class SparePart(models.Model):
-    """Spare parts linked to a maintenance record."""
+    """
+    Represents a decoupled internal physical part. Typically links dynamically 
+    when an operation needs explicit stock consumption tracking beyond generalized accounting. 
+    """
     maintenance = models.ForeignKey(
         MaintenanceRecord, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='parts',
@@ -94,6 +110,7 @@ class SparePart(models.Model):
     quantity = models.TextField(blank=True, null=True)
     unit_cost = models.TextField(blank=True, null=True)
     total_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -102,6 +119,7 @@ class SparePart(models.Model):
         verbose_name = 'Spare Part'
 
     def save(self, *args, **kwargs):
+        """Calculates derived absolute costs transparently."""
         try:
             if self.quantity and self.unit_cost:
                 self.total_cost = float(self.quantity) * float(self.unit_cost)
@@ -114,6 +132,10 @@ class SparePart(models.Model):
 
 
 class SparePartUsed(models.Model):
+    """
+    Acts as a definitive ledger entry specifying exact parts consumed during a MaintenanceRecord.
+    Strictly calculates ledger expenditure implicitly on SQL insert.
+    """
     maintenance = models.ForeignKey(
         MaintenanceRecord, on_delete=models.CASCADE, related_name='spare_parts',
     )
@@ -128,6 +150,7 @@ class SparePartUsed(models.Model):
         db_table = 'spare_parts_used'
 
     def save(self, *args, **kwargs):
+        """Auto-calculate total to prevent API mathematical inconsistencies or malicious manual overrides."""
         if self.quantity and self.unit_cost:
             self.total_cost = self.quantity * self.unit_cost
         super().save(*args, **kwargs)

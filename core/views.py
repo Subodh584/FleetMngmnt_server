@@ -30,19 +30,24 @@ User = get_user_model()
 
 
 # ---------------------------------------------------------------------------
-# Auth views
+# Auth Views
 # ---------------------------------------------------------------------------
 
 class RegisterView(generics.CreateAPIView):
-    """Register a new user (open endpoint)."""
-
+    """
+    API endpoint that allows new users to register.
+    Open to all users (AllowAny). Returns user data and JWT tokens upon success.
+    """
     serializer_class = UserRegistrationSerializer
     permission_classes = [permissions.AllowAny]
 
     def create(self, request, *args, **kwargs):
+        # Validate input and create user
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        
+        # Generate JWT refresh and access tokens
         refresh = RefreshToken.for_user(user)
         return Response(
             {
@@ -57,17 +62,21 @@ class RegisterView(generics.CreateAPIView):
 
 
 class MeView(generics.RetrieveUpdateAPIView):
-    """Retrieve / update the authenticated user's profile."""
-
+    """
+    API endpoint for retrieving and updating the authenticated user's profile.
+    Automatically resolves and resets rest status on retrieval.
+    """
     permission_classes = [permissions.IsAuthenticated]
 
     def get_serializer_class(self):
+        # Use partial update serializer for PUT/PATCH methods
         if self.request.method in ('PUT', 'PATCH'):
             return UserProfileUpdateSerializer
         return UserSerializer
 
     def get_object(self):
         user = self.request.user
+        # Automatically update the driver_status if the rest period has expired
         if hasattr(user, 'profile'):
             user.profile.resolve_rest_status()
         return user
@@ -76,18 +85,24 @@ class MeView(generics.RetrieveUpdateAPIView):
         serializer = UserProfileUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.update(request.user, serializer.validated_data)
+        
+        # Return full updated user object
         return Response(UserSerializer(request.user, context={'request': request}).data)
 
 
 class ChangePasswordView(generics.GenericAPIView):
-    """Change the authenticated user's password."""
-
+    """
+    API endpoint that allows an authenticated user to change their password.
+    Automatically removes the 'first_time_login' flag.
+    """
     serializer_class = ChangePasswordSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        
+        # Enforce new password
         request.user.set_password(serializer.validated_data['new_password'])
         request.user.save()
         
@@ -101,8 +116,10 @@ class ChangePasswordView(generics.GenericAPIView):
 
 
 class SendCredentialsEmailView(APIView):
-    """Send user credentials (userid & password) to the given email address."""
-
+    """
+    API endpoint allowing Fleet Managers or Admins to send generated
+    login credentials to newly created user email addresses.
+    """
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
@@ -121,7 +138,7 @@ class SendCredentialsEmailView(APIView):
         if errors:
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # Build the email
+        # Build the plaintext and HTML email content
         subject = 'Your Ochima Login Credentials'
         plain_message = (
             f'Hello,\n\n'
@@ -152,6 +169,7 @@ class SendCredentialsEmailView(APIView):
         )
 
         try:
+            # Perform the mail send using Django's core mail system
             send_mail(
                 subject=subject,
                 message=plain_message,
@@ -170,48 +188,65 @@ class SendCredentialsEmailView(APIView):
 
 
 class ClockInView(APIView):
-    """Driver clocks in — sets driver_status to 'available'."""
-
+    """
+    API endpoint for drivers to clock in.
+    Updates the driver profile status to 'available'.
+    """
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         profile = request.user.profile
+        
+        # Block clocking in if the user hasn't successfully completed/aborted their prior trip
         if profile.driver_status == 'in_trip':
             return Response(
                 {'detail': 'Cannot clock in while on an active trip. Complete the trip first.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+            
+        # Block clocking in if the user is currently permitted time off
         if profile.driver_status == 'on_leave':
             return Response(
                 {'detail': 'Cannot clock in while on approved leave.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+            
+        # Wipe rest period blocks and update status
         profile.driver_status = 'available'
         profile.rest_ends_at = None
         profile.save(update_fields=['driver_status', 'rest_ends_at', 'updated_at'])
+        
         return Response({'driver_status': profile.driver_status, 'detail': 'Clocked in successfully. You are now available.'})
 
 
 class ClockOutView(APIView):
-    """Driver clocks out — sets driver_status to 'clocked_out'."""
-
+    """
+    API endpoint for drivers to clock out.
+    Updates the driver profile status to 'clocked_out'.
+    """
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
         profile = request.user.profile
+        
+        # Prevent clocking out while an active trip is running
         if profile.driver_status == 'in_trip':
             return Response(
                 {'detail': 'Cannot clock out while on an active trip. Complete the trip first.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+            
         profile.driver_status = 'clocked_out'
         profile.save(update_fields=['driver_status', 'updated_at'])
+        
         return Response({'driver_status': profile.driver_status, 'detail': 'Clocked out successfully. You are now unavailable.'})
 
 
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
-    """List / retrieve users (fleet managers can see all)."""
-
+    """
+    API endpoint to list and retrieve users.
+    Typically used by Fleet Managers to obtain rosters / search users.
+    """
     queryset = User.objects.select_related('profile').all()
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -220,42 +255,56 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=['post'])
     def reset_credentials(self, request, pk=None):
-        """Fleet manager resets a user's password and returns the new one."""
+        """
+        Custom action exclusively for Fleet Managers to randomly generate and 
+        overwrite a targeted user's password format securely.
+        """
         if not hasattr(request.user, 'profile') or request.user.profile.role != 'fleet_manager':
             return Response({'detail': 'Not authorized.'}, status=status.HTTP_403_FORBIDDEN)
+            
         user = self.get_object()
         chars = string.ascii_letters + string.digits + '!@#$%'
         new_password = ''.join(secrets.choice(chars) for _ in range(12))
+        
         user.set_password(new_password)
         user.save()
         return Response({'username': user.username, 'password': new_password})
 
 
 # ---------------------------------------------------------------------------
-# Driver document views
+# Driver Document Views
 # ---------------------------------------------------------------------------
 
 class DriverDocumentViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint to list, upload, or remove legal documents for drivers.
+    Access constrained by user role.
+    """
     serializer_class = DriverDocumentSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['document_type', 'user']
 
     def get_queryset(self):
         user = self.request.user
-        # Drivers see only their own documents; fleet managers see all
+        # Fleet Managers query globally, Drivers only query their own files
         if hasattr(user, 'profile') and user.profile.role == 'fleet_manager':
             return DriverDocument.objects.select_related('user').all()
         return DriverDocument.objects.select_related('user').filter(user=user)
 
     def perform_create(self, serializer):
+        # Automatically associate the incoming uploaded file to the sender
         serializer.save(user=self.request.user)
 
 
 # ---------------------------------------------------------------------------
-# Profile image views
+# Profile Image Views
 # ---------------------------------------------------------------------------
 
 class ProfileImageViewSet(viewsets.ModelViewSet):
+    """
+    Optional alternative workflow endpoint for profile image updates and retrieval.
+    Mostly follows identical ownership logic to Document uploads.
+    """
     serializer_class = ProfileImageSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -270,10 +319,14 @@ class ProfileImageViewSet(viewsets.ModelViewSet):
 
 
 # ---------------------------------------------------------------------------
-# Location views
+# Location Views
 # ---------------------------------------------------------------------------
 
 class LocationViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint mapping fixed spatial locales such as warehouses and points of interest. 
+    Can be retrieved by anyone, but created/updated only by Fleet Managers.
+    """
     queryset = Location.objects.all()
     serializer_class = LocationSerializer
     permission_classes = [IsFleetManagerOrReadOnly]
@@ -282,10 +335,14 @@ class LocationViewSet(viewsets.ModelViewSet):
 
 
 # ---------------------------------------------------------------------------
-# Geofence views
+# Geofence Views
 # ---------------------------------------------------------------------------
 
 class GeofenceViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint for viewing and constructing geometric zones bound to a Location.
+    Follows read-only permissions for default users, allowing full CRUD for Managers.
+    """
     queryset = Geofence.objects.select_related('location', 'created_by').all()
     serializer_class = GeofenceSerializer
     permission_classes = [IsFleetManagerOrReadOnly]
@@ -296,29 +353,41 @@ class GeofenceViewSet(viewsets.ModelViewSet):
 
 
 # ---------------------------------------------------------------------------
-# Leave request views
+# Leave Request Views
 # ---------------------------------------------------------------------------
 
 class LeaveRequestViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint allowing Drivers to log time-off requirements, while 
+    alerting Fleet Managers to respond via subsequent state modifications.
+    """
     serializer_class = LeaveRequestSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['status', 'driver']
 
     def get_queryset(self):
         user = self.request.user
+        # Query masking: Managers list everything, Drivers list theirs alone
         if hasattr(user, 'profile') and user.profile.role == 'fleet_manager':
             return LeaveRequest.objects.select_related('driver', 'reviewed_by').all()
         return LeaveRequest.objects.select_related('driver', 'reviewed_by').filter(driver=user)
 
     def perform_create(self, serializer):
+        """
+        Creates the Leave request on behalf of the driver 
+        and dispatches notifications to all management-level accounts.
+        """
         serializer.save(driver=self.request.user)
+        
         # Notify all fleet managers of the new leave request
         from comms.models import Notification
         from django.contrib.auth import get_user_model
+        
         User = get_user_model()
         leave = serializer.instance
         driver_name = self.request.user.get_full_name() or self.request.user.username
         managers = User.objects.filter(profile__role='fleet_manager')
+        
         Notification.objects.bulk_create([
             Notification(
                 user=mgr,
@@ -333,18 +402,25 @@ class LeaveRequestViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], permission_classes=[IsFleetManager])
     def approve(self, request, pk=None):
+        """
+        Lifecycle step to advance a Leave from 'Pending' to 'Approved'.
+        Updates the driver's global profile state concurrently.
+        """
         leave = self.get_object()
         if leave.status != 'pending':
             return Response({'detail': 'Only pending requests can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
+            
         leave.status = 'approved'
         leave.reviewed_by = request.user
         leave.reviewed_at = timezone.now()
         leave.save()
-        # Set driver status to on_leave
+        
+        # Set targeted driver status to on_leave
         profile = leave.driver.profile
         profile.driver_status = 'on_leave'
         profile.save(update_fields=['driver_status', 'updated_at'])
-        # Notify driver
+        
+        # Notify driver of their successful status adjustment
         from comms.models import Notification
         Notification.objects.create(
             user=leave.driver,
@@ -358,15 +434,21 @@ class LeaveRequestViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], permission_classes=[IsFleetManager])
     def reject(self, request, pk=None):
+        """
+        Lifecycle step to abort an ongoing Leave request as 'Rejected'.
+        Records the rejection justification context provided by management.
+        """
         leave = self.get_object()
         if leave.status != 'pending':
             return Response({'detail': 'Only pending requests can be rejected.'}, status=status.HTTP_400_BAD_REQUEST)
+            
         leave.status = 'rejected'
         leave.reviewed_by = request.user
         leave.reviewed_at = timezone.now()
         leave.rejection_reason = request.data.get('reason', '')
         leave.save()
-        # Notify driver
+        
+        # Notify driver of failure/feedback
         from comms.models import Notification
         Notification.objects.create(
             user=leave.driver,

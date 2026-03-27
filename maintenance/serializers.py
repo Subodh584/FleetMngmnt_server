@@ -28,6 +28,9 @@ class MaintenanceScheduleSerializer(serializers.ModelSerializer):
 
 
 class MaintenanceRecordSerializer(serializers.ModelSerializer):
+    """
+    Standard read-out exposing physical maintenance tasks alongside their explicit consumption histories.
+    """
     spare_parts = SparePartUsedSerializer(many=True, read_only=True)
 
     class Meta:
@@ -37,15 +40,20 @@ class MaintenanceRecordSerializer(serializers.ModelSerializer):
 
 
 class SparePartInlineSerializer(serializers.ModelSerializer):
-    """Write-only nested serializer used when creating spare parts inline
-    inside a MaintenanceRecord. Excludes 'maintenance' and 'id' because
-    those are set programmatically during record creation."""
+    """
+    Write-only nested serializer specifically used for fast API array ingestions 
+    when mapping bulk parts instantly into a new MaintenanceRecord instantiation block.
+    """
     class Meta:
         model = SparePartUsed
         fields = ['part_name', 'part_number', 'quantity', 'unit_cost']
 
 
 class MaintenanceRecordCreateSerializer(serializers.ModelSerializer):
+    """
+    Complex ingest resolver allowing frontend clients to dump 
+    Maintenance bounds and nested Inventory constraints synchronously over the network.
+    """
     spare_parts = SparePartInlineSerializer(many=True, required=False)
 
     class Meta:
@@ -59,13 +67,18 @@ class MaintenanceRecordCreateSerializer(serializers.ModelSerializer):
         spare_parts_data = validated_data.pop('spare_parts', [])
         user = self.context['request'].user
         record = MaintenanceRecord.objects.create(assigned_by=user, **validated_data)
+        
+        # Inject explicit decoupled relationships securely.
         for sp_data in spare_parts_data:
             SparePartUsed.objects.create(maintenance=record, **sp_data)
-        # Set vehicle under_maintenance
+            
+        # Secure cascading lock onto the global asset map instantly.
         vehicle = record.vehicle
         vehicle.status = 'under_maintenance'
         vehicle.save(update_fields=['status', 'updated_at'])
+        
         return record
 
     def to_representation(self, instance):
+        # Prevent the user receiving a weird inbound write-object context wrapper implicitly. 
         return MaintenanceRecordSerializer(instance).data

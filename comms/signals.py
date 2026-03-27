@@ -16,10 +16,15 @@ User = get_user_model()
 
 @receiver(post_save, sender=SOSAlert)
 def sos_alert_notification(sender, instance, created, **kwargs):
-    """Notify all fleet managers when an SOS alert is triggered."""
+    """
+    Hooks directly into the DB lifecycle of SOSAlert instantiations natively.
+    Synchronously forces the generation of high-visibility unread Database Notifications for every 
+    active Fleet Manager globally, while also attempting an asynchronous push-layer WebSocket broadcast instantly.
+    """
     if not created:
         return
 
+    # Dynamically resolve absolute authority nodes globally mapping across the whole organizational identity layer.
     fleet_managers = User.objects.filter(
         profile__role='fleet_manager', is_active=True,
     )
@@ -37,9 +42,10 @@ def sos_alert_notification(sender, instance, created, **kwargs):
             )
         )
 
+    # Ingest entire array natively scaling via single blocking SQL boundary
     Notification.objects.bulk_create(notifications)
 
-    # Push via WebSocket
+    # Push concurrently out to WebSockets ensuring visual immediate dashboard interruptions
     try:
         channel_layer = get_channel_layer()
         if channel_layer:
@@ -60,4 +66,5 @@ def sos_alert_notification(sender, instance, created, **kwargs):
                     },
                 )
     except Exception:
+        # Never fail a critical SOS insert just because standard web-sockets dropped out randomly natively
         pass
